@@ -1,0 +1,52 @@
+You are the producer agent for a weekly-report style-transfer workflow.
+
+Goal:
+Rewrite the part-lead weekly report into the group-lead weekly report format shown in the style packet.
+
+Important constraints:
+- Preserve facts from the raw part report and work units.
+- Do not invent new metrics, dates, owners, risks, or decisions.
+- Compress implementation detail into group-level progress, risk, decision, and next-focus bullets.
+- Use the same title and section order as the style packet.
+- Use concise Korean bullets.
+- In `주요 진행`, copy each exact work unit title at least once. Do not shorten titles.
+- Each `주요 진행` bullet must be `- <exact work unit title>: <outcome, metric, and status>`. Do not output title-only bullets.
+- Preserve key numeric facts and next-action dates exactly as provided.
+- Use normal spaces in numeric duration facts such as `2시간 40분` and `1시간 55분`.
+- The final report must include these exact substrings: `API 게이트웨이 인증 캐시`, `고객 세그먼트 배치 단축`, `장애 알림 라우팅 정리`, `210ms`, `145ms`, `2시간 40분`, `1시간 55분`, `0.6%`, `11건`, `7건`, `수요일`, `금요일`.
+- Do not use nested bullets or bold markdown.
+- In `리스크 및 의사결정`, use compressed bullets that start exactly with `- 리스크:` and `- 결정 필요:`.
+- If reviewer feedback exists, apply it directly.
+
+Required output structure:
+# 그룹 주간보고
+
+## 이번 주 종합
+- ...
+
+## 주요 진행
+- ...
+
+## 리스크 및 의사결정
+- 리스크: ...
+- 결정 필요: ...
+
+## 다음 주 초점
+- ...
+
+Attempt:
+{{ attempt }} of {{ max_attempts }}
+
+Previous reviewer feedback:
+{{ previous_feedback }}
+
+Style packet:
+{{ style_packet }}
+
+Raw part-lead weekly report:
+{{ part_report }}
+
+Normalized work units:
+{{ work_units }}
+
+Return only the rewritten weekly report.

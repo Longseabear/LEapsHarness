@@ -1,0 +1,83 @@
+{
+  "name": "weekly_style_transfer_example",
+  "artifact_root": ".runs",
+  "vars": {
+    "style_sample_dir": "input/group_style_samples",
+    "part_report": "input/part_weekly_raw.md",
+    "work_units": "input/work_units.json",
+    "hidden_reference": "expected/hidden_group_weekly.md"
+  },
+  "steps": [
+    {
+      "id": "collect_part_report",
+      "type": "copy_file",
+      "source": "{{ var.part_report }}",
+      "artifact": "part_weekly_raw.md"
+    },
+    {
+      "id": "collect_work_units",
+      "type": "copy_file",
+      "source": "{{ var.work_units }}",
+      "artifact": "work_units.json"
+    },
+    {
+      "id": "collect_hidden_reference",
+      "type": "copy_file",
+      "source": "{{ var.hidden_reference }}",
+      "artifact": "hidden_group_weekly.md"
+    },
+    {
+      "id": "build_style_packet",
+      "type": "command",
+      "command": [
+        "{{ python.executable }}",
+        "tools/build_style_packet.py",
+        "{{ var.style_sample_dir }}"
+      ],
+      "stdout_artifact": "style_packet.md"
+    },
+    {
+      "id": "transfer_to_group_style",
+      "type": "iterative_review",
+      "producer_adapter": "weekly_style_writer",
+      "reviewer_adapter": "weekly_style_reviewer",
+      "producer_template": "templates/writer_prompt.txt",
+      "reviewer_template": "templates/reviewer_prompt.txt",
+      "max_attempts": 4,
+      "data": {
+        "style_packet": {
+          "from_artifact": "build_style_packet.stdout",
+          "format": "text"
+        },
+        "part_report": {
+          "from_artifact": "collect_part_report.path",
+          "format": "text"
+        },
+        "work_units": {
+          "from_artifact": "collect_work_units.path",
+          "format": "json"
+        },
+        "hidden_reference": {
+          "from_artifact": "collect_hidden_reference.path",
+          "format": "text"
+        }
+      },
+      "draft_artifact": "draft_group_weekly.md",
+      "review_artifact": "review.json",
+      "history_artifact": "iteration_history.json",
+      "final_artifact": "group_weekly_report.md",
+      "final_review_artifact": "final_review.json"
+    },
+    {
+      "id": "validate_report_contract",
+      "type": "command",
+      "command": [
+        "{{ python.executable }}",
+        "tools/validate_report_contract.py",
+        "{{ artifact.transfer_to_group_style.final }}",
+        "{{ artifact.collect_work_units.path }}"
+      ],
+      "stdout_artifact": "contract_validation.json"
+    }
+  ]
+}

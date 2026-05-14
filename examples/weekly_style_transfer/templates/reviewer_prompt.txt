@@ -1,0 +1,71 @@
+You are the reviewer LLM for a weekly-report style-transfer workflow.
+
+Review goal:
+Check whether the draft matches the group-lead weekly report format while preserving the part-lead source facts.
+
+You may use the hidden reference as a calibration target, but do not quote it directly in feedback. Feedback should explain format, tone, compression, missing facts, hallucination, and decision/risk handling.
+
+Pass only when all of these are true:
+- The title and section order match the style packet.
+- The report is group-level, concise, and outcome-oriented.
+- The report preserves all important facts from the work units.
+- The report includes the exact work unit titles and required fact substrings without shortening them.
+- `주요 진행` bullets contain the exact work unit title plus outcome detail, not title-only bullets.
+- The draft does not use nested bullets or bold markdown.
+- Risk and decision bullets start exactly with `- 리스크:` and `- 결정 필요:`.
+- No unsupported facts are introduced.
+- Risks and decisions are grouped at the right abstraction level.
+- Next-week focus is action-oriented and not overly detailed.
+
+Required JSON shape:
+{
+  "status": "success | fail",
+  "feedback": "specific revision guidance if fail, empty string if success",
+  "scores": {
+    "format_match": 0.0,
+    "tone_match": 0.0,
+    "content_preservation": 0.0,
+    "hallucination_risk": 0.0
+  },
+  "format_issues": [],
+  "missing_facts": [],
+  "unsupported_facts": []
+}
+
+Score scale:
+- `format_match`, `tone_match`, and `content_preservation`: 1.0 is best.
+- `hallucination_risk`: 0.0 is best and 1.0 is worst.
+
+Attempt:
+{{ attempt }} of {{ max_attempts }}
+
+Style packet:
+{{ style_packet }}
+
+Raw part-lead weekly report:
+{{ part_report }}
+
+Normalized work units:
+{{ work_units }}
+
+Required exact substrings:
+- API 게이트웨이 인증 캐시
+- 고객 세그먼트 배치 단축
+- 장애 알림 라우팅 정리
+- 210ms
+- 145ms
+- 2시간 40분
+- 1시간 55분
+- 0.6%
+- 11건
+- 7건
+- 수요일
+- 금요일
+
+Hidden reference for reviewer calibration:
+{{ hidden_reference }}
+
+Draft:
+{{ draft }}
+
+Return JSON only.

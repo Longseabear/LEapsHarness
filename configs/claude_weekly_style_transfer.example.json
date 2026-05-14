@@ -1,0 +1,24 @@
+{
+  "agent_adapters": {
+    "weekly_style_writer": {
+      "type": "command",
+      "command": [
+        "claude",
+        "-p"
+      ],
+      "input_mode": "argument",
+      "timeout_seconds": 300
+    }
+  },
+  "llm_adapters": {
+    "weekly_style_reviewer": {
+      "type": "command",
+      "command": [
+        "claude",
+        "-p"
+      ],
+      "input_mode": "argument",
+      "timeout_seconds": 300
+    }
+  }
+}
