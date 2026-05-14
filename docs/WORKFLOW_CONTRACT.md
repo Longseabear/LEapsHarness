@@ -65,6 +65,8 @@ Supported formats:
 
 Add new built-in step types cautiously. If the behavior is specific to one workflow, prefer a `command` or `agent` step that calls workflow-local code. A built-in step should be generic enough to serve multiple workflows.
 
+For standalone prompt rendering outside a workflow run, use the Prompt Builder documented in [PROMPT_BUILDER.md](PROMPT_BUILDER.md). Use the `prompt` step when prompt construction should be captured as part of a reproducible workflow manifest.
+
 ## Iterative Review Step
 
 Use `iterative_review` for bounded producer/reviewer loops. It is generic enough for style review, report drafting, code generation, document cleanup, and other workflows where a structured reviewer can produce feedback for another attempt.

@@ -162,6 +162,8 @@ See [examples/weekly_style_transfer](examples/weekly_style_transfer) for a weekl
 
 Use the prompt builder when you want to keep a reusable prompt template and swap values with a dictionary.
 
+See [docs/PROMPT_BUILDER.md](docs/PROMPT_BUILDER.md) for detailed CLI and Python usage.
+
 Template:
 
 ```text
