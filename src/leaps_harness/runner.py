@@ -159,6 +159,8 @@ class WorkflowRunner:
                 env=env,
                 input=stdin,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 capture_output=True,
                 timeout=timeout_seconds,
                 check=False,
@@ -460,7 +462,10 @@ class WorkflowRunner:
             message = f"target length is at least {value}" if passed else f"target length is below {value}"
         elif check_type == "contains":
             value = str(check.get("value", ""))
-            passed = value in target_text
+            case_sensitive = bool(check.get("case_sensitive", True))
+            haystack = target_text if case_sensitive else target_text.lower()
+            needle = value if case_sensitive else value.lower()
+            passed = needle in haystack
             message = f"target contains {value!r}" if passed else f"target does not contain {value!r}"
         else:
             raise WorkflowError(f"Unsupported review check type '{check_type}'.")

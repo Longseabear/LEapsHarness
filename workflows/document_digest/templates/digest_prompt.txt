@@ -1,0 +1,16 @@
+Create a concise document digest.
+
+Source document:
+{{ source_document }}
+
+Extracted metadata:
+{{ document_facts }}
+
+Output format:
+- Title
+- Summary
+- Key points
+- Open questions
+- Evidence or confidence notes
+
+Keep the digest factual and avoid inventing details not present in the source document.

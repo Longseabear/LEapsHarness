@@ -113,6 +113,32 @@ class WorkflowRunnerTests(unittest.TestCase):
             self.assertEqual(len(stdout_paths), 1)
             self.assertIn("before failure", stdout_paths[0].read_text(encoding="utf-8"))
 
+    def test_command_stdout_is_decoded_as_utf8(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            workflow = {
+                "name": "utf8_workflow",
+                "artifact_root": "runs",
+                "steps": [
+                    {
+                        "id": "utf8",
+                        "type": "command",
+                        "command": [
+                            sys.executable,
+                            "-c",
+                            "import sys; sys.stdout.buffer.write('snowman: ☃'.encode('utf-8'))",
+                        ],
+                    }
+                ],
+            }
+            workflow_path = workspace / "workflow.json"
+            workflow_path.write_text(json.dumps(workflow), encoding="utf-8")
+
+            summary = WorkflowRunner(workflow_path, run_id="utf8-run").run()
+
+            stdout_path = Path(summary["steps"][0]["outputs"]["stdout"])
+            self.assertEqual(stdout_path.read_text(encoding="utf-8"), "snowman: ☃")
+
     def test_run_vars_override_workflow_vars(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -381,6 +407,38 @@ class WorkflowRunnerTests(unittest.TestCase):
 
             self.assertTrue(any("missing_adapter" in error for error in errors))
             self.assertTrue(any("missing" in error for error in errors))
+
+    def test_review_contains_can_be_case_insensitive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            workflow_path = workspace / "workflow.json"
+            workflow_path.write_text(
+                json.dumps(
+                    {
+                        "name": "review_workflow",
+                        "artifact_root": "runs",
+                        "steps": [
+                            {
+                                "id": "review",
+                                "type": "review",
+                                "target": {"literal": "Weekly Report"},
+                                "checks": [
+                                    {
+                                        "type": "contains",
+                                        "value": "weekly report",
+                                        "case_sensitive": False,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = WorkflowRunner(workflow_path, run_id="review-run").run()
+
+            self.assertTrue(summary["steps"][0]["outputs"]["passed"])
 
     def test_build_workflow_plan_does_not_create_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

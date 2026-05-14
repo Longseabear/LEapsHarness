@@ -112,7 +112,8 @@
         },
         {
           "type": "contains",
-          "value": "weekly report"
+          "value": "weekly report",
+          "case_sensitive": false
         }
       ],
       "artifact": "review.json",

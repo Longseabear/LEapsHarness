@@ -50,7 +50,7 @@ Current growth points:
 
 ## Quick Start
 
-The current runnable workflow is `workflows/weekly_report`. Treat it as a reference implementation for how operated workflows should be structured.
+The current runnable workflows are `workflows/weekly_report` and `workflows/document_digest`. Treat them as reference implementations for how operated workflows should be structured without making the core runtime domain-specific.
 
 From PowerShell:
 

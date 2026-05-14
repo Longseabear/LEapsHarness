@@ -1,0 +1,77 @@
+{
+  "name": "document_digest_v0",
+  "artifact_root": ".runs",
+  "vars": {
+    "document_input": "input/sample_document.md"
+  },
+  "llm_adapters": {
+    "default": {
+      "type": "echo"
+    }
+  },
+  "steps": [
+    {
+      "id": "collect_document",
+      "type": "copy_file",
+      "source": "{{ var.document_input }}",
+      "artifact": "source_document.md"
+    },
+    {
+      "id": "extract_document_facts",
+      "type": "command",
+      "command": [
+        "{{ python.executable }}",
+        "tools/extract_document_facts.py",
+        "{{ artifact.collect_document.path }}"
+      ],
+      "stdout_artifact": "document_facts.json",
+      "stderr_artifact": "extract_stderr.txt",
+      "timeout_seconds": 30
+    },
+    {
+      "id": "build_digest_prompt",
+      "type": "prompt",
+      "template": "templates/digest_prompt.txt",
+      "data": {
+        "source_document": {
+          "from_artifact": "collect_document.path",
+          "format": "text"
+        },
+        "document_facts": {
+          "from_artifact": "extract_document_facts.stdout",
+          "format": "json"
+        }
+      },
+      "artifact": "digest_prompt.txt"
+    },
+    {
+      "id": "draft_digest",
+      "type": "llm",
+      "adapter": "default",
+      "prompt": {
+        "from_artifact": "build_digest_prompt.prompt",
+        "format": "text"
+      },
+      "artifact": "digest.md"
+    },
+    {
+      "id": "review_digest",
+      "type": "review",
+      "target": {
+        "from_artifact": "draft_digest.response",
+        "format": "text"
+      },
+      "checks": [
+        {
+          "type": "not_empty"
+        },
+        {
+          "type": "min_length",
+          "value": 80
+        }
+      ],
+      "artifact": "review.json",
+      "report_artifact": "review.md"
+    }
+  ]
+}

@@ -61,6 +61,8 @@ class CommandLLMAdapter:
                 env=env,
                 input=stdin,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 capture_output=True,
                 timeout=self.timeout_seconds,
                 check=False,
