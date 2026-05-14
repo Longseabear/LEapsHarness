@@ -171,6 +171,45 @@ python -m leaps_harness serve --host 127.0.0.1 --port 8765 --workflow-root .
 
 See [docs/API.md](docs/API.md) for request examples.
 
+## Python Library Usage
+
+The harness can also be used directly from Python code.
+
+```python
+from leaps_harness import plan_workflow, run_workflow, validate_workflow
+
+workflow = "workflows/document_digest/workflow.json"
+
+plan = plan_workflow(
+    workflow,
+    configs=["configs/claude_cli.example.json"],
+    vars={"document_input": r"C:\data\source.md"},
+)
+if not plan.valid:
+    raise RuntimeError(plan.validation_errors)
+
+validation = validate_workflow(workflow, configs=["configs/claude_cli.example.json"])
+if not validation.valid:
+    raise RuntimeError(validation.errors)
+
+result = run_workflow(
+    workflow,
+    configs=["configs/claude_cli.example.json"],
+    vars={"document_input": r"C:\data\source.md"},
+    run_id="doc-001",
+)
+
+print(result.status)
+print(result.artifact_dir)
+print(result.readable_manifest_path)
+```
+
+Public API objects:
+
+- `WorkflowPlan`: merged plan, validation errors, step list, artifact root.
+- `ValidationResult`: `valid` plus validation error list.
+- `WorkflowResult`: status, run id, artifact paths, step summaries, raw manifest summary.
+
 ## Development Checks
 
 Run tests with:
