@@ -23,6 +23,8 @@ No runtime dependency outside the Python standard library is required.
 - Preserve every important intermediate artifact for debugging, audit, retry, and review.
 - Start from CLI-proven workflows, then expose them through a thin API only after the execution path is stable.
 
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the harness-oriented agent architecture and control-plane principles.
+
 ## Generalization Rules
 
 When adding features, prefer reusable runtime capabilities over workflow-specific behavior.

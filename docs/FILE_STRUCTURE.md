@@ -26,7 +26,7 @@ LEapsCustomHarness/
 ## Top-Level Directories
 
 - `configs/`: non-secret configuration templates for approved LLMs, internal tools, and runtime defaults.
-- `docs/`: design notes, file structure, workflow contracts, and operator guidance.
+- `docs/`: architecture notes, file structure, workflow contracts, and operator guidance.
 - `examples/`: runnable reference workflows that are not operated workflows.
 - `workflows/`: first-party workflow definitions intended for real use. The current v0 workflow is `workflows/weekly_report/`.
 - `src/leaps_harness/`: harness runtime package.
