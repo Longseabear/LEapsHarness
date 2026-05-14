@@ -6,8 +6,9 @@ import sys
 from pathlib import Path
 
 from .api import serve
-from .config import ConfigError
+from .config import ConfigError, load_json_file
 from .planning import build_workflow_plan
+from .prompt_builder import PromptBuildError, build_prompt_from_file
 from .runner import WorkflowError, WorkflowRunner
 from .validation import validate_workflow_file
 
@@ -63,6 +64,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Runtime variable override. May be repeated.",
     )
 
+    render_prompt_parser = subparsers.add_parser(
+        "render-prompt",
+        help="Render a prompt template with JSON values and KEY=VALUE overrides.",
+    )
+    render_prompt_parser.add_argument("template", type=Path, help="Path to a prompt template file.")
+    render_prompt_parser.add_argument("--values", type=Path, help="JSON object with template values.")
+    render_prompt_parser.add_argument(
+        "--var",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Template value override. May be repeated.",
+    )
+    render_prompt_parser.add_argument("--output", type=Path, help="Optional output file for the rendered prompt.")
+
     serve_parser = subparsers.add_parser("serve", help="Run the stdlib HTTP API wrapper.")
     serve_parser.add_argument("--host", default="127.0.0.1", help="Bind host.")
     serve_parser.add_argument("--port", type=int, default=8765, help="Bind port.")
@@ -114,6 +130,20 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(json.dumps(plan, indent=2, sort_keys=True))
         return 1 if plan["validation_errors"] else 0
+
+    if args.command == "render-prompt":
+        try:
+            values = load_json_file(args.values) if args.values else {}
+            values.update(_parse_vars(args.var))
+            prompt = build_prompt_from_file(args.template, values)
+        except (ConfigError, PromptBuildError, WorkflowError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        if args.output:
+            args.output.write_text(prompt, encoding="utf-8", newline="\n")
+        else:
+            print(prompt)
+        return 0
 
     if args.command == "serve":
         serve(args.host, args.port, args.workflow_root)

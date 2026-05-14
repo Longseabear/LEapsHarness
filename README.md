@@ -158,6 +158,64 @@ Minimal shape:
 See [examples/style_review_loop](examples/style_review_loop) for a Claude-backed producer/reviewer example.
 See [examples/weekly_style_transfer](examples/weekly_style_transfer) for a weekly-report style-transfer evaluation with style samples, hidden reference calibration, and a deterministic contract validator.
 
+## Prompt Builder
+
+Use the prompt builder when you want to keep a reusable prompt template and swap values with a dictionary.
+
+Template:
+
+```text
+Write a report for {{ person.name }}.
+
+Role: {{ person.role }}
+
+Work units:
+{{ work_units }}
+```
+
+Values:
+
+```json
+{
+  "person": {
+    "name": "Mina",
+    "role": "파트장"
+  },
+  "work_units": [
+    {
+      "title": "API gateway cache",
+      "status": "in progress"
+    }
+  ]
+}
+```
+
+Render from the CLI:
+
+```powershell
+python -m leaps_harness render-prompt .\template.txt --values .\values.json --output .\prompt.txt
+```
+
+Override one value without editing the JSON:
+
+```powershell
+python -m leaps_harness render-prompt .\template.txt --values .\values.json --var person.role=그룹장
+```
+
+Use from Python:
+
+```python
+from leaps_harness import build_prompt
+
+prompt = build_prompt(
+    "Write a report for {{ person.name }}.\n\n{{ work_units }}",
+    {
+        "person": {"name": "Mina"},
+        "work_units": [{"title": "API gateway cache"}],
+    },
+)
+```
+
 ## LLM Adapters
 
 The default adapter type is `echo`, which is useful for offline tests and harness development.
