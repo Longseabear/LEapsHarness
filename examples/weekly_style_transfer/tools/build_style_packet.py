@@ -4,7 +4,13 @@ import sys
 from pathlib import Path
 
 
+def _force_utf8_stdio() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
+
 def main() -> int:
+    _force_utf8_stdio()
     if len(sys.argv) != 2:
         print("Usage: build_style_packet.py <group_style_samples_dir>", file=sys.stderr)
         return 2

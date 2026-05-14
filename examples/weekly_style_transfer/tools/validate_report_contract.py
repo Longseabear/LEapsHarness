@@ -5,6 +5,11 @@ import sys
 from pathlib import Path
 
 
+def _force_utf8_stdio() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
+
 REQUIRED_HEADINGS = [
     "# 그룹 주간보고",
     "## 이번 주 종합",
@@ -28,6 +33,7 @@ REQUIRED_FACTS = [
 
 
 def main() -> int:
+    _force_utf8_stdio()
     if len(sys.argv) != 3:
         print("Usage: validate_report_contract.py <report.md> <work_units.json>", file=sys.stderr)
         return 2

@@ -78,6 +78,20 @@
         "{{ artifact.collect_work_units.path }}"
       ],
       "stdout_artifact": "contract_validation.json"
+    },
+    {
+      "id": "build_evaluation_report",
+      "type": "command",
+      "command": [
+        "{{ python.executable }}",
+        "tools/build_evaluation_report.py",
+        "{{ var.style_sample_dir }}",
+        "{{ artifact.collect_hidden_reference.path }}",
+        "{{ artifact.transfer_to_group_style.history }}",
+        "{{ artifact.transfer_to_group_style.review }}",
+        "{{ artifact.validate_report_contract.stdout }}"
+      ],
+      "stdout_artifact": "evaluation_report.md"
     }
   ]
 }

@@ -12,6 +12,7 @@ The reusable pattern is:
 4. Let a reviewer LLM check format, tone, fact preservation, unsupported facts, risks, and decisions.
 5. Retry with reviewer feedback until the reviewer passes or `max_attempts` is reached.
 6. Run a deterministic contract validator against the final report.
+7. Build a human-readable evaluation report that compares group style samples, the hidden reference, generated attempts, reviewer feedback, and validation results.
 
 The hidden reference is only used by the reviewer prompt as calibration. The producer prompt does not include it.
 
@@ -34,6 +35,7 @@ Useful artifacts:
 - `steps/transfer_to_group_style/iteration_history.json`
 - `steps/transfer_to_group_style/group_weekly_report.md`
 - `steps/validate_report_contract/contract_validation.json`
+- `steps/build_evaluation_report/evaluation_report.md`
 
 ## What This Evaluates
 
@@ -42,3 +44,5 @@ Useful artifacts:
 - Content preservation: metrics, dates, risks, decisions, and next actions from work units.
 - Hallucination risk: facts that are not present in source inputs.
 - Contract compliance: deterministic headings and required facts.
+
+`evaluation_report.md` is the easiest artifact to inspect after a run. It shows the group style samples, hidden reference, each generated attempt, the feedback between attempts, final reviewer scores, and deterministic contract validation.

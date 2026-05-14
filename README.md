@@ -157,6 +157,7 @@ Minimal shape:
 
 See [examples/style_review_loop](examples/style_review_loop) for a Claude-backed producer/reviewer example.
 See [examples/weekly_style_transfer](examples/weekly_style_transfer) for a weekly-report style-transfer evaluation with style samples, hidden reference calibration, and a deterministic contract validator.
+The weekly style-transfer example also writes an `evaluation_report.md` artifact that compares style samples, each generated attempt, reviewer feedback, and validation results.
 
 ## Prompt Builder
 
