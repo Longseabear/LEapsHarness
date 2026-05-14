@@ -1,0 +1,16 @@
+Write a concise weekly report.
+
+Source weekly report inputs:
+{{ source_inputs }}
+
+Normalized work units:
+{{ work_units }}
+
+Drafted work sections:
+{{ work_sections }}
+
+Constraints:
+- Group related work together.
+- Keep the tone factual and operational.
+- Mention evidence gaps when the source data is incomplete.
+- Produce Markdown with a clear title and short sections.

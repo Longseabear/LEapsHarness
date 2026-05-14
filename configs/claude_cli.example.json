@@ -1,0 +1,24 @@
+{
+  "llm_adapters": {
+    "default": {
+      "type": "command",
+      "command": [
+        "claude",
+        "-p"
+      ],
+      "input_mode": "argument",
+      "timeout_seconds": 300
+    }
+  },
+  "agent_adapters": {
+    "weekly_work_agent": {
+      "type": "command",
+      "command": [
+        "claude",
+        "-p"
+      ],
+      "input_mode": "argument",
+      "timeout_seconds": 300
+    }
+  }
+}

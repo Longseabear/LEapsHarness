@@ -1,0 +1,122 @@
+{
+  "name": "weekly_report_v0",
+  "artifact_root": ".runs",
+  "vars": {
+    "weekly_input": "input/team_weekly_reports.json"
+  },
+  "agent_adapters": {
+    "weekly_work_agent": {
+      "type": "command",
+      "command": [
+        "{{ python.executable }}",
+        "tools/draft_work_unit_agent.py"
+      ],
+      "timeout_seconds": 30
+    }
+  },
+  "llm_adapters": {
+    "default": {
+      "type": "echo"
+    }
+  },
+  "steps": [
+    {
+      "id": "collect_inputs",
+      "type": "copy_file",
+      "source": "{{ var.weekly_input }}",
+      "artifact": "team_weekly_reports.json"
+    },
+    {
+      "id": "normalize_work",
+      "type": "command",
+      "command": [
+        "{{ python.executable }}",
+        "tools/normalize_weekly_reports.py",
+        "{{ artifact.collect_inputs.path }}"
+      ],
+      "stdout_artifact": "work_units.json",
+      "stderr_artifact": "normalize_stderr.txt",
+      "timeout_seconds": 30
+    },
+    {
+      "id": "validate_work_units",
+      "type": "command",
+      "command": [
+        "{{ python.executable }}",
+        "tools/validate_work_units.py",
+        "{{ artifact.normalize_work.stdout }}"
+      ],
+      "stdout_artifact": "validated_work_units.json",
+      "stderr_artifact": "validation_stderr.txt",
+      "timeout_seconds": 30
+    },
+    {
+      "id": "draft_work_units",
+      "type": "for_each",
+      "items": {
+        "from_artifact": "validate_work_units.stdout",
+        "format": "json_value"
+      },
+      "item_path": "work_units",
+      "adapter": "weekly_work_agent",
+      "input_template": "templates/work_unit_agent_input.txt",
+      "input_artifact": "work_unit_input.json",
+      "artifact": "work_section.md",
+      "results_artifact": "work_unit_agent_results.json",
+      "combined_artifact": "work_sections.md"
+    },
+    {
+      "id": "build_final_prompt",
+      "type": "prompt",
+      "template": "templates/final_report_prompt.txt",
+      "data": {
+        "source_inputs": {
+          "from_artifact": "collect_inputs.path",
+          "format": "json"
+        },
+        "work_units": {
+          "from_artifact": "validate_work_units.stdout",
+          "format": "json"
+        },
+        "work_sections": {
+          "from_artifact": "draft_work_units.combined",
+          "format": "text"
+        }
+      },
+      "artifact": "final_report_prompt.txt"
+    },
+    {
+      "id": "draft_final_report",
+      "type": "llm",
+      "adapter": "default",
+      "prompt": {
+        "from_artifact": "build_final_prompt.prompt",
+        "format": "text"
+      },
+      "artifact": "weekly_report.md"
+    },
+    {
+      "id": "review_final_report",
+      "type": "review",
+      "target": {
+        "from_artifact": "draft_final_report.response",
+        "format": "text"
+      },
+      "checks": [
+        {
+          "type": "not_empty"
+        },
+        {
+          "type": "min_length",
+          "value": 80
+        },
+        {
+          "type": "contains",
+          "value": "weekly report"
+        }
+      ],
+      "artifact": "review.json",
+      "report_artifact": "review.md"
+    }
+  ]
+}

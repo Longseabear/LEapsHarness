@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WorkUnitsDocument",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "week",
+    "schema_version",
+    "work_units"
+  ],
+  "properties": {
+    "week": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "work_units.v0"
+    },
+    "work_units": {
+      "type": "array",
+      "items": {
+        "$ref": "work_unit.schema.json"
+      }
+    }
+  }
+}

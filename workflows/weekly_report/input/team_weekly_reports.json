@@ -1,0 +1,37 @@
+{
+  "week": "2026-W20",
+  "people": [
+    {
+      "name": "Mina",
+      "items": [
+        {
+          "title": "Customer onboarding checklist",
+          "summary": "Reviewed missing onboarding steps and drafted a cleaner checklist.",
+          "evidence": [
+            "onboarding-notes.md",
+            "support-ticket-export.csv"
+          ]
+        },
+        {
+          "title": "Internal model access",
+          "summary": "Collected constraints for approved LLM usage in the private runtime.",
+          "evidence": [
+            "model-access-policy.md"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Joon",
+      "items": [
+        {
+          "title": "CLI agent prototype",
+          "summary": "Validated that a CLI agent can run with file-based inputs and artifacts.",
+          "evidence": [
+            "agent-run-log.txt"
+          ]
+        }
+      ]
+    }
+  ]
+}

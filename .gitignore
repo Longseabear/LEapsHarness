@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local workflow runs and generated artifacts
+.runs/
+**/.runs/
+
+# Local environment files
+.env
+.env.*
+
+# Editor and OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

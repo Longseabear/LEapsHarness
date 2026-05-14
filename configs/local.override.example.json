@@ -1,0 +1,5 @@
+{
+  "vars": {
+    "weekly_input": "input/team_weekly_reports.json"
+  }
+}
