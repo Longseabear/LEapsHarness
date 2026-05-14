@@ -12,6 +12,7 @@ Use this directory for:
 Do not commit credentials, private endpoints, or machine-specific secrets.
 
 See `claude_cli.example.json` for the expected shape of `claude -p` backed LLM and CLI agent adapters.
+See `claude_style_loop.example.json` for a producer/reviewer loop where both adapters are backed by `claude -p`.
 
 Multiple config files can be layered with repeated `--config` flags. Apply broad defaults first and local overrides last.
 

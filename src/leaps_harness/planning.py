@@ -50,7 +50,18 @@ def _step_plan(index: int, step: Any) -> dict[str, Any]:
         "type": step_type,
         "outputs": sorted(OUTPUTS_BY_TYPE.get(step_type, set())),
     }
-    for key in ("adapter", "source", "template", "input_template", "item_path"):
+    for key in (
+        "adapter",
+        "source",
+        "template",
+        "input_template",
+        "item_path",
+        "producer_adapter",
+        "reviewer_adapter",
+        "producer_template",
+        "reviewer_template",
+        "max_attempts",
+    ):
         if key in step:
             planned[key] = step[key]
     if step_type == "command":

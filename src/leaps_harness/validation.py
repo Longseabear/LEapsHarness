@@ -7,7 +7,7 @@ from typing import Any
 from .config import ConfigError, load_json_file, load_runtime_configs, merge_runtime_configs, normalize_config_paths
 
 
-SUPPORTED_STEP_TYPES = {"copy_file", "command", "prompt", "agent", "for_each", "llm", "review"}
+SUPPORTED_STEP_TYPES = {"copy_file", "command", "prompt", "agent", "for_each", "llm", "review", "iterative_review"}
 OUTPUTS_BY_TYPE = {
     "copy_file": {"path"},
     "command": {"stdout", "stderr", "metadata", "returncode"},
@@ -16,6 +16,7 @@ OUTPUTS_BY_TYPE = {
     "for_each": {"results", "combined", "count"},
     "llm": {"response", "metadata"},
     "review": {"review", "report", "passed"},
+    "iterative_review": {"final", "history", "review", "attempts", "passed"},
 }
 TOKEN_PATTERN = re.compile(r"{{.*?}}")
 
@@ -102,6 +103,16 @@ def _validate_step_shape(
         errors.extend(_validate_adapter(step_id, step, workflow, "llm_adapters"))
     elif step_type == "review":
         errors.extend(_require_fields(step_id, step, ["target"]))
+    elif step_type == "iterative_review":
+        errors.extend(_require_fields(step_id, step, ["producer_template", "reviewer_template"]))
+        errors.extend(_validate_iterative_adapter(step_id, step, workflow, "producer_adapter", "agent_adapters"))
+        errors.extend(_validate_iterative_adapter(step_id, step, workflow, "reviewer_adapter", "llm_adapters"))
+        producer_template = step.get("producer_template")
+        reviewer_template = step.get("reviewer_template")
+        if isinstance(producer_template, str):
+            errors.extend(_validate_existing_path(step_id, "producer_template", producer_template, workspace_dir))
+        if isinstance(reviewer_template, str):
+            errors.extend(_validate_existing_path(step_id, "reviewer_template", reviewer_template, workspace_dir))
     return errors
 
 
@@ -121,6 +132,22 @@ def _validate_adapter(
         return [f"Workflow field '{adapter_field}' must be an object."]
     if adapter_name not in adapters:
         return [f"Step '{step_id}' references unknown adapter '{adapter_name}' in '{adapter_field}'."]
+    return []
+
+
+def _validate_iterative_adapter(
+    step_id: str,
+    step: dict[str, Any],
+    workflow: dict[str, Any],
+    step_adapter_field: str,
+    workflow_adapter_field: str,
+) -> list[str]:
+    adapter_name = step.get(step_adapter_field, "default")
+    adapters = workflow.get(workflow_adapter_field, {"default": {"type": "echo"}})
+    if not isinstance(adapters, dict):
+        return [f"Workflow field '{workflow_adapter_field}' must be an object."]
+    if adapter_name not in adapters:
+        return [f"Step '{step_id}' references unknown adapter '{adapter_name}' in '{workflow_adapter_field}'."]
     return []
 
 

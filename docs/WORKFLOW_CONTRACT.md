@@ -61,8 +61,56 @@ Supported formats:
 - `for_each`: select a JSON list and run a configured CLI agent adapter once per item.
 - `llm`: call an approved LLM adapter and store the response.
 - `review`: run deterministic checks such as `not_empty`, `min_length`, and `contains`.
+- `iterative_review`: run a configured producer agent, review the draft with a configured LLM, and retry with reviewer feedback until it passes or reaches `max_attempts`.
 
 Add new built-in step types cautiously. If the behavior is specific to one workflow, prefer a `command` or `agent` step that calls workflow-local code. A built-in step should be generic enough to serve multiple workflows.
+
+## Iterative Review Step
+
+Use `iterative_review` for bounded producer/reviewer loops. It is generic enough for style review, report drafting, code generation, document cleanup, and other workflows where a structured reviewer can produce feedback for another attempt.
+
+Required fields:
+
+- `producer_template`: prompt template for the producer agent.
+- `reviewer_template`: prompt template for the reviewer LLM.
+
+Common optional fields:
+
+- `producer_adapter`: agent adapter name, defaults to `default`.
+- `reviewer_adapter`: LLM adapter name, defaults to `default`.
+- `max_attempts`: maximum attempts, defaults to `3`.
+- `data`: values loaded from literals or previous artifacts and injected into both templates.
+- `fail_on_max_attempts`: defaults to `true`.
+
+During each attempt, the producer template receives:
+
+- `attempt`
+- `max_attempts`
+- `previous_feedback`
+- `history_json`
+- any values from `data`
+
+The reviewer template receives all producer values plus:
+
+- `draft`
+
+The reviewer response must be a JSON object. These pass:
+
+```json
+{"status": "success", "feedback": ""}
+```
+
+```json
+{"passed": true, "feedback": ""}
+```
+
+These fail and feed `feedback` into the next producer attempt:
+
+```json
+{"status": "fail", "feedback": "make the ending less explicit"}
+```
+
+The step writes per-attempt prompts, drafts, raw reviewer output, parsed review JSON, adapter metadata, final output, final review, and `iteration_history.json`.
 
 ## Failure Policy
 

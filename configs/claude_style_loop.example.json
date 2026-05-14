@@ -1,0 +1,24 @@
+{
+  "agent_adapters": {
+    "writer_agent": {
+      "type": "command",
+      "command": [
+        "claude",
+        "-p"
+      ],
+      "input_mode": "argument",
+      "timeout_seconds": 300
+    }
+  },
+  "llm_adapters": {
+    "style_reviewer": {
+      "type": "command",
+      "command": [
+        "claude",
+        "-p"
+      ],
+      "input_mode": "argument",
+      "timeout_seconds": 300
+    }
+  }
+}

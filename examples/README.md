@@ -7,3 +7,7 @@ The weekly report flow has been promoted to:
 ```text
 workflows/weekly_report/
 ```
+
+Current examples:
+
+- `style_review_loop/`: producer/reviewer feedback loop using the generic `iterative_review` step.

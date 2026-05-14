@@ -96,6 +96,8 @@ class WorkflowRunner:
                 outputs = self._llm(step_id, step)
             elif step_type == "review":
                 outputs = self._review(step_id, step)
+            elif step_type == "iterative_review":
+                outputs = self._iterative_review(step_id, step)
             else:
                 raise StepExecutionError(f"Unsupported step type '{step_type}' in step '{step_id}'.")
         except Exception as exc:
@@ -364,6 +366,100 @@ class WorkflowRunner:
             "passed": passed,
         }
 
+    def _iterative_review(self, step_id: str, step: dict[str, Any]) -> dict[str, Any]:
+        max_attempts = int(step.get("max_attempts", 3))
+        if max_attempts < 1:
+            raise StepExecutionError(f"Step '{step_id}' max_attempts must be at least 1.")
+
+        producer_template = self._read_template(step_id, step, "producer_template")
+        reviewer_template = self._read_template(step_id, step, "reviewer_template")
+        producer_adapter_name = step.get("producer_adapter", "default")
+        reviewer_adapter_name = step.get("reviewer_adapter", "default")
+        producer_config = self._adapter_config(step_id, "agent_adapters", producer_adapter_name)
+        reviewer_config = self._adapter_config(step_id, "llm_adapters", reviewer_adapter_name)
+        data_values = self._step_data_values(step)
+        previous_feedback = str(step.get("initial_feedback", ""))
+        history: list[dict[str, Any]] = []
+        final_text = ""
+        final_review: dict[str, Any] = {}
+        passed = False
+
+        for attempt in range(1, max_attempts + 1):
+            attempt_step_id = f"{step_id}_attempt_{attempt}"
+            values = self._values()
+            values.update(data_values)
+            values.update(
+                {
+                    "attempt": str(attempt),
+                    "max_attempts": str(max_attempts),
+                    "previous_feedback": previous_feedback,
+                    "history_json": json.dumps(history, indent=2, sort_keys=True),
+                }
+            )
+            producer_prompt = render_template(producer_template, values)
+            producer_prompt_path = self.artifacts.write_text(attempt_step_id, "producer_prompt.txt", producer_prompt)
+
+            try:
+                producer = build_agent_adapter(producer_adapter_name, producer_config, self.workspace_dir, values)
+                producer_result = producer.run(producer_prompt)
+            except AgentAdapterError as exc:
+                raise StepExecutionError(f"Step '{step_id}' producer failed on attempt {attempt}: {exc}") from exc
+
+            final_text = producer_result.text
+            draft_path = self.artifacts.write_text(attempt_step_id, step.get("draft_artifact", "draft.md"), final_text)
+            producer_metadata_path = self.artifacts.write_json(attempt_step_id, "producer_agent.json", producer_result.metadata)
+
+            review_values = dict(values)
+            review_values["draft"] = final_text
+            reviewer_prompt = render_template(reviewer_template, review_values)
+            reviewer_prompt_path = self.artifacts.write_text(attempt_step_id, "reviewer_prompt.txt", reviewer_prompt)
+
+            try:
+                reviewer = build_llm_adapter(reviewer_adapter_name, reviewer_config, self.workspace_dir, review_values)
+                reviewer_result = reviewer.generate(reviewer_prompt)
+            except LLMAdapterError as exc:
+                raise StepExecutionError(f"Step '{step_id}' reviewer failed on attempt {attempt}: {exc}") from exc
+
+            review_raw_path = self.artifacts.write_text(attempt_step_id, "review_raw.txt", reviewer_result.text)
+            reviewer_metadata_path = self.artifacts.write_json(attempt_step_id, "reviewer_llm.json", reviewer_result.metadata)
+            final_review = self._parse_iterative_review(step_id, attempt, reviewer_result.text)
+            review_path = self.artifacts.write_json(attempt_step_id, step.get("review_artifact", "review.json"), final_review)
+            passed = self._iterative_review_passed(final_review)
+            feedback = str(final_review.get("feedback", ""))
+            history.append(
+                {
+                    "attempt": attempt,
+                    "passed": passed,
+                    "status": final_review.get("status"),
+                    "feedback": feedback,
+                    "draft": str(draft_path.resolve()),
+                    "review": str(review_path.resolve()),
+                    "producer_prompt": str(producer_prompt_path.resolve()),
+                    "reviewer_prompt": str(reviewer_prompt_path.resolve()),
+                    "review_raw": str(review_raw_path.resolve()),
+                    "producer_metadata": str(producer_metadata_path.resolve()),
+                    "reviewer_metadata": str(reviewer_metadata_path.resolve()),
+                }
+            )
+            if passed:
+                break
+            previous_feedback = feedback
+
+        history_path = self.artifacts.write_json(step_id, step.get("history_artifact", "iteration_history.json"), history)
+        final_path = self.artifacts.write_text(step_id, step.get("final_artifact", "final.md"), final_text)
+        final_review_path = self.artifacts.write_json(step_id, step.get("final_review_artifact", "final_review.json"), final_review)
+
+        if not passed and step.get("fail_on_max_attempts", True):
+            raise StepExecutionError(f"Step '{step_id}' did not pass review after {max_attempts} attempts.")
+
+        return {
+            "final": str(final_path.resolve()),
+            "history": str(history_path.resolve()),
+            "review": str(final_review_path.resolve()),
+            "attempts": len(history),
+            "passed": passed,
+        }
+
     def _resolve_value(self, spec: Any) -> Any:
         if isinstance(spec, dict):
             if "from_artifact" in spec:
@@ -385,6 +481,58 @@ class WorkflowRunner:
         if isinstance(spec, str):
             return render_template(spec, self._values())
         return spec
+
+    def _read_template(self, step_id: str, step: dict[str, Any], field: str) -> str:
+        value = step.get(field)
+        if not value:
+            raise StepExecutionError(f"Step '{step_id}' requires '{field}'.")
+        template_path = self._resolve_path(render_template(str(value), self._values()))
+        if not template_path.exists():
+            raise StepExecutionError(f"Step '{step_id}' {field} does not exist: {template_path}")
+        return template_path.read_text(encoding="utf-8")
+
+    def _adapter_config(self, step_id: str, adapter_field: str, adapter_name: str) -> dict[str, Any]:
+        adapters = self.workflow.get(adapter_field, {"default": {"type": "echo"}})
+        if not isinstance(adapters, dict):
+            raise StepExecutionError(f"Workflow field '{adapter_field}' must be an object.")
+        adapter_config = adapters.get(adapter_name)
+        if adapter_config is None:
+            raise StepExecutionError(f"Step '{step_id}' references unknown adapter '{adapter_name}'.")
+        if not isinstance(adapter_config, dict):
+            raise StepExecutionError(f"Adapter '{adapter_name}' must be an object.")
+        return adapter_config
+
+    def _step_data_values(self, step: dict[str, Any]) -> dict[str, str]:
+        values: dict[str, str] = {}
+        for key, spec in step.get("data", {}).items():
+            values[key] = self._stringify(self._resolve_value(spec))
+        return values
+
+    @staticmethod
+    def _parse_iterative_review(step_id: str, attempt: int, review_text: str) -> dict[str, Any]:
+        stripped = review_text.strip()
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            stripped = stripped[start : end + 1]
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            raise StepExecutionError(
+                f"Step '{step_id}' reviewer returned invalid JSON on attempt {attempt}: {exc}"
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise StepExecutionError(f"Step '{step_id}' reviewer JSON must be an object on attempt {attempt}.")
+        if "status" not in parsed and "passed" not in parsed:
+            raise StepExecutionError(f"Step '{step_id}' reviewer JSON requires 'status' or 'passed'.")
+        return parsed
+
+    @staticmethod
+    def _iterative_review_passed(review: dict[str, Any]) -> bool:
+        if isinstance(review.get("passed"), bool):
+            return bool(review["passed"])
+        status = str(review.get("status", "")).strip().lower()
+        return status in {"success", "passed", "pass", "ok"}
 
     def _artifact_path(self, reference: str) -> Path:
         try:

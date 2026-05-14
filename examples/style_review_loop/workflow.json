@@ -1,0 +1,35 @@
+{
+  "name": "style_review_loop_example",
+  "artifact_root": ".runs",
+  "vars": {
+    "source_story": "input/blue_bird_story.txt"
+  },
+  "steps": [
+    {
+      "id": "collect_story",
+      "type": "copy_file",
+      "source": "{{ var.source_story }}",
+      "artifact": "source_story.txt"
+    },
+    {
+      "id": "rewrite_until_profile_match",
+      "type": "iterative_review",
+      "producer_adapter": "writer_agent",
+      "reviewer_adapter": "style_reviewer",
+      "producer_template": "templates/writer_prompt.txt",
+      "reviewer_template": "templates/reviewer_prompt.txt",
+      "max_attempts": 4,
+      "data": {
+        "source_story": {
+          "from_artifact": "collect_story.path",
+          "format": "text"
+        }
+      },
+      "draft_artifact": "draft.md",
+      "review_artifact": "review.json",
+      "history_artifact": "iteration_history.json",
+      "final_artifact": "final_story.md",
+      "final_review_artifact": "final_review.json"
+    }
+  ]
+}

@@ -126,7 +126,7 @@ class WorkflowRunnerTests(unittest.TestCase):
                         "command": [
                             sys.executable,
                             "-c",
-                            "import sys; sys.stdout.buffer.write('snowman: ☃'.encode('utf-8'))",
+                            "import sys; sys.stdout.buffer.write('snowman: \\u2603'.encode('utf-8'))",
                         ],
                     }
                 ],
@@ -137,7 +137,7 @@ class WorkflowRunnerTests(unittest.TestCase):
             summary = WorkflowRunner(workflow_path, run_id="utf8-run").run()
 
             stdout_path = Path(summary["steps"][0]["outputs"]["stdout"])
-            self.assertEqual(stdout_path.read_text(encoding="utf-8"), "snowman: ☃")
+            self.assertEqual(stdout_path.read_text(encoding="utf-8"), "snowman: \u2603")
 
     def test_run_vars_override_workflow_vars(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -244,6 +244,95 @@ class WorkflowRunnerTests(unittest.TestCase):
             readable_manifest = workspace / "runs" / "foreach-run" / "manifest.md"
             self.assertTrue(readable_manifest.exists())
             self.assertIn("draft_items", readable_manifest.read_text(encoding="utf-8"))
+
+    def test_iterative_review_retries_until_reviewer_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "source.txt").write_text("The blue bird was hidden in the heart.", encoding="utf-8")
+            (workspace / "writer.py").write_text(
+                "\n".join(
+                    [
+                        "import sys",
+                        "prompt = sys.stdin.read()",
+                        "if 'make it quieter' in prompt:",
+                        "    print('The blue bird waited in the cup. Nobody explained it.')",
+                        "else:",
+                        "    print('A direct moral fairy tale.')",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (workspace / "reviewer.py").write_text(
+                "\n".join(
+                    [
+                        "import json, sys",
+                        "prompt = sys.stdin.read()",
+                        "if 'waited in the cup' in prompt:",
+                        "    print(json.dumps({'status': 'success', 'feedback': ''}))",
+                        "else:",
+                        "    print(json.dumps({'status': 'fail', 'feedback': 'make it quieter'}))",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (workspace / "writer_prompt.txt").write_text(
+                "Previous feedback: {{ previous_feedback }}\nStory: {{ source_story }}\n",
+                encoding="utf-8",
+            )
+            (workspace / "reviewer_prompt.txt").write_text("Draft:\n{{ draft }}\n", encoding="utf-8")
+            workflow = {
+                "name": "iterative_workflow",
+                "artifact_root": "runs",
+                "agent_adapters": {
+                    "producer": {
+                        "type": "command",
+                        "command": [sys.executable, "writer.py"],
+                    }
+                },
+                "llm_adapters": {
+                    "reviewer": {
+                        "type": "command",
+                        "command": [sys.executable, "reviewer.py"],
+                    }
+                },
+                "steps": [
+                    {
+                        "id": "collect",
+                        "type": "copy_file",
+                        "source": "source.txt",
+                    },
+                    {
+                        "id": "loop",
+                        "type": "iterative_review",
+                        "producer_adapter": "producer",
+                        "reviewer_adapter": "reviewer",
+                        "producer_template": "writer_prompt.txt",
+                        "reviewer_template": "reviewer_prompt.txt",
+                        "max_attempts": 3,
+                        "data": {
+                            "source_story": {
+                                "from_artifact": "collect.path",
+                                "format": "text",
+                            }
+                        },
+                    },
+                ],
+            }
+            workflow_path = workspace / "workflow.json"
+            workflow_path.write_text(json.dumps(workflow), encoding="utf-8")
+
+            self.assertEqual(validate_workflow_file(workflow_path), [])
+            plan = build_workflow_plan(workflow_path)
+            self.assertEqual(plan["steps"][1]["outputs"], ["attempts", "final", "history", "passed", "review"])
+
+            summary = WorkflowRunner(workflow_path, run_id="iterative-run").run()
+
+            loop_outputs = summary["steps"][1]["outputs"]
+            self.assertTrue(loop_outputs["passed"])
+            self.assertEqual(loop_outputs["attempts"], 2)
+            self.assertIn("waited in the cup", Path(loop_outputs["final"]).read_text(encoding="utf-8"))
+            history = json.loads(Path(loop_outputs["history"]).read_text(encoding="utf-8"))
+            self.assertEqual([item["passed"] for item in history], [False, True])
 
     def test_api_runs_workflow(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

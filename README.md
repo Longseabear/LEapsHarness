@@ -100,6 +100,7 @@ Supported step types:
 - `for_each`: run a CLI agent adapter once per item in a JSON list.
 - `llm`: send a prompt to an LLM adapter and store the response.
 - `review`: run deterministic checks against an artifact.
+- `iterative_review`: run a producer agent and reviewer LLM in a bounded feedback loop until the reviewer passes the result.
 
 Workflow paths are resolved relative to the workflow file.
 
@@ -115,6 +116,44 @@ workflows/<workflow_name>/
 ```
 
 The harness runtime should not need to know what the workflow is about.
+
+## Feedback Loops
+
+Use `iterative_review` when a workflow needs a producer to revise output based on structured reviewer feedback.
+
+The step keeps each attempt as artifacts:
+
+- producer prompt
+- draft output
+- reviewer prompt
+- raw reviewer response
+- parsed review JSON
+- per-attempt metadata
+- final output and iteration history
+
+The reviewer must return JSON with either `status` or `passed`. The run succeeds when `status` is `success`, `passed`, `pass`, or `ok`, or when `"passed": true`.
+
+Minimal shape:
+
+```json
+{
+  "id": "revise_until_passed",
+  "type": "iterative_review",
+  "producer_adapter": "writer_agent",
+  "reviewer_adapter": "style_reviewer",
+  "producer_template": "templates/writer_prompt.txt",
+  "reviewer_template": "templates/reviewer_prompt.txt",
+  "max_attempts": 4,
+  "data": {
+    "source": {
+      "from_artifact": "collect.path",
+      "format": "text"
+    }
+  }
+}
+```
+
+See [examples/style_review_loop](examples/style_review_loop) for a Claude-backed producer/reviewer example.
 
 ## LLM Adapters
 
