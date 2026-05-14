@@ -245,7 +245,7 @@ class WorkflowRunnerTests(unittest.TestCase):
             self.assertTrue(readable_manifest.exists())
             self.assertIn("draft_items", readable_manifest.read_text(encoding="utf-8"))
 
-    def test_iterative_review_retries_until_reviewer_passes(self) -> None:
+    def test_iterative_review_runs_three_feedback_rounds_before_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             (workspace / "source.txt").write_text("The blue bird was hidden in the heart.", encoding="utf-8")
@@ -254,8 +254,12 @@ class WorkflowRunnerTests(unittest.TestCase):
                     [
                         "import sys",
                         "prompt = sys.stdin.read()",
-                        "if 'make it quieter' in prompt:",
+                        "if 'make the ending unresolved' in prompt:",
                         "    print('The blue bird waited in the cup. Nobody explained it.')",
+                        "elif 'add an ordinary strange image' in prompt:",
+                        "    print('The blue bird waited beside an empty cup.')",
+                        "elif 'shorten the sentences' in prompt:",
+                        "    print('The blue bird was quiet.')",
                         "else:",
                         "    print('A direct moral fairy tale.')",
                     ]
@@ -266,11 +270,18 @@ class WorkflowRunnerTests(unittest.TestCase):
                 "\n".join(
                     [
                         "import json, sys",
+                        "import re",
                         "prompt = sys.stdin.read()",
-                        "if 'waited in the cup' in prompt:",
+                        "attempt = int(re.search(r'Attempt: (\\d+)', prompt).group(1))",
+                        "feedback = {",
+                        "    1: 'shorten the sentences',",
+                        "    2: 'add an ordinary strange image',",
+                        "    3: 'make the ending unresolved',",
+                        "}",
+                        "if attempt >= 4 and 'Nobody explained it' in prompt:",
                         "    print(json.dumps({'status': 'success', 'feedback': ''}))",
                         "else:",
-                        "    print(json.dumps({'status': 'fail', 'feedback': 'make it quieter'}))",
+                        "    print(json.dumps({'status': 'fail', 'feedback': feedback.get(attempt, 'revise again')}))",
                     ]
                 ),
                 encoding="utf-8",
@@ -279,7 +290,7 @@ class WorkflowRunnerTests(unittest.TestCase):
                 "Previous feedback: {{ previous_feedback }}\nStory: {{ source_story }}\n",
                 encoding="utf-8",
             )
-            (workspace / "reviewer_prompt.txt").write_text("Draft:\n{{ draft }}\n", encoding="utf-8")
+            (workspace / "reviewer_prompt.txt").write_text("Attempt: {{ attempt }}\nDraft:\n{{ draft }}\n", encoding="utf-8")
             workflow = {
                 "name": "iterative_workflow",
                 "artifact_root": "runs",
@@ -308,7 +319,7 @@ class WorkflowRunnerTests(unittest.TestCase):
                         "reviewer_adapter": "reviewer",
                         "producer_template": "writer_prompt.txt",
                         "reviewer_template": "reviewer_prompt.txt",
-                        "max_attempts": 3,
+                        "max_attempts": 4,
                         "data": {
                             "source_story": {
                                 "from_artifact": "collect.path",
@@ -329,10 +340,14 @@ class WorkflowRunnerTests(unittest.TestCase):
 
             loop_outputs = summary["steps"][1]["outputs"]
             self.assertTrue(loop_outputs["passed"])
-            self.assertEqual(loop_outputs["attempts"], 2)
+            self.assertEqual(loop_outputs["attempts"], 4)
             self.assertIn("waited in the cup", Path(loop_outputs["final"]).read_text(encoding="utf-8"))
             history = json.loads(Path(loop_outputs["history"]).read_text(encoding="utf-8"))
-            self.assertEqual([item["passed"] for item in history], [False, True])
+            self.assertEqual([item["passed"] for item in history], [False, False, False, True])
+            self.assertEqual(
+                [item["feedback"] for item in history[:3]],
+                ["shorten the sentences", "add an ordinary strange image", "make the ending unresolved"],
+            )
 
     def test_api_runs_workflow(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

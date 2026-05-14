@@ -2,6 +2,8 @@
 
 This example tests a generic framework behavior: one producer creates a draft, one reviewer returns structured feedback, and the harness retries the producer until the review succeeds or `max_attempts` is reached.
 
+The reviewer prompt intentionally fails attempts 1, 2, and 3 so the run proves that at least three feedback rounds are preserved before success is possible.
+
 The story task is intentionally just a sample domain. The reusable part is the `iterative_review` step.
 
 The prompt uses an abstract prose profile instead of asking for imitation of a named living author. The reviewer is also instructed to avoid author names and return only structural feedback.

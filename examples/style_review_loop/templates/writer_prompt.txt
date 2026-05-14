@@ -19,6 +19,9 @@ Attempt:
 Previous reviewer feedback:
 {{ previous_feedback }}
 
+Revision rule:
+For attempts after the first, prioritize the newest reviewer feedback over the previous draft. Keep the source story intact, but revise sentence shape, rhythm, imagery, and emotional distance according to that feedback.
+
 Source story:
 {{ source_story }}
 
