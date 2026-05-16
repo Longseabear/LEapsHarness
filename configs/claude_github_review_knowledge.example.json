@@ -1,0 +1,13 @@
+{
+  "agent_adapters": {
+    "github_review_agent": {
+      "type": "command",
+      "command": [
+        "claude",
+        "-p"
+      ],
+      "input_mode": "argument",
+      "timeout_seconds": 300
+    }
+  }
+}

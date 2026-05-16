@@ -1,0 +1,64 @@
+{
+  "name": "github_review_knowledge_example",
+  "artifact_root": ".runs",
+  "vars": {
+    "repo_root": "input/sample_repo",
+    "module": "bpc",
+    "knowledge_root": "knowledge/REPO_KNOWLEDGE",
+    "max_files": "16",
+    "max_bytes": "50000"
+  },
+  "steps": [
+    {
+      "id": "select_module_files",
+      "type": "command",
+      "command": [
+        "{{ python.executable }}",
+        "tools/select_module_files.py",
+        "{{ var.repo_root }}",
+        "{{ var.module }}",
+        "--max-files",
+        "{{ var.max_files }}"
+      ],
+      "stdout_artifact": "module_file_selection.json"
+    },
+    {
+      "id": "build_review_packet",
+      "type": "command",
+      "command": [
+        "{{ python.executable }}",
+        "tools/build_review_packet.py",
+        "{{ artifact.select_module_files.stdout }}",
+        "--max-bytes",
+        "{{ var.max_bytes }}"
+      ],
+      "stdout_artifact": "review_packet.md"
+    },
+    {
+      "id": "draft_knowledge_update",
+      "type": "agent",
+      "adapter": "github_review_agent",
+      "input_template": "templates/review_worker_prompt.txt",
+      "data": {
+        "module": "{{ var.module }}",
+        "review_packet": {
+          "from_artifact": "build_review_packet.stdout",
+          "format": "text"
+        }
+      },
+      "artifact": "knowledge_update.json"
+    },
+    {
+      "id": "apply_knowledge_update",
+      "type": "command",
+      "command": [
+        "{{ python.executable }}",
+        "tools/apply_knowledge_update.py",
+        "{{ var.module }}",
+        "{{ var.knowledge_root }}",
+        "{{ artifact.draft_knowledge_update.response }}"
+      ],
+      "stdout_artifact": "apply_summary.json"
+    }
+  ]
+}
