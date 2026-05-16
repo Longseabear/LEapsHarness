@@ -67,7 +67,7 @@ class ExampleWorkflowTests(unittest.TestCase):
                         "purpose": "bad pixel correction",
                         "summary": "BPC clamps boundaries and replaces outliers.",
                         "confidence": "medium",
-                        "module_doc_markdown": "# Module: bpc\n\nPurpose: bad pixel correction.",
+                        "module_doc_markdown": "# Module: bpc\\n\\nPurpose: bad pixel correction.",
                         "patterns": [
                             {
                                 "name": "boundary",
@@ -77,7 +77,7 @@ class ExampleWorkflowTests(unittest.TestCase):
                         "skills": [
                             {
                                 "name": "debug_bpc",
-                                "markdown": "# Debug BPC\n\n## Goal\nInspect outlier replacement.",
+                                "markdown": "# Debug BPC\\n\\n## Goal\\nInspect outlier replacement.",
                             }
                         ],
                         "todos": ["Confirm SIMD path."],
@@ -108,6 +108,8 @@ class ExampleWorkflowTests(unittest.TestCase):
             self.assertTrue((knowledge_root / "modules" / "bpc.md").exists())
             self.assertTrue((knowledge_root / "patterns" / "boundary.md").exists())
             self.assertTrue((knowledge_root / "skills" / "debug_bpc.md").exists())
+            self.assertIn("\n\nPurpose:", (knowledge_root / "modules" / "bpc.md").read_text())
+            self.assertIn("\n\n## Goal\n", (knowledge_root / "skills" / "debug_bpc.md").read_text())
             self.assertIn("Confirm SIMD path.", (knowledge_root / "_inbox" / "discovered_notes.md").read_text())
 
     def test_weekly_style_transfer_example_validates_with_claude_config(self) -> None:

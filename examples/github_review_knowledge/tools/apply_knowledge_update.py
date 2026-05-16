@@ -30,7 +30,8 @@ def main() -> int:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     module_path = knowledge_root / "modules" / f"{module}.md"
-    module_path.write_text(str(update["module_doc_markdown"]).strip() + "\n", encoding="utf-8", newline="\n")
+    module_doc = _normalize_markdown(str(update["module_doc_markdown"]))
+    module_path.write_text(module_doc.strip() + "\n", encoding="utf-8", newline="\n")
 
     _update_module_index(
         knowledge_root / "maps" / "module_index.md",
@@ -124,7 +125,7 @@ def _update_module_index(path: Path, module: str, purpose: str, timestamp: str, 
 
 def _append_named_observation(root: Path, item: dict[str, Any], module: str, timestamp: str, kind: str) -> None:
     name = _safe_name(str(item.get("name", "unnamed")))
-    markdown = str(item.get("markdown", "")).strip()
+    markdown = _normalize_markdown(str(item.get("markdown", ""))).strip()
     if not markdown:
         return
     path = root / f"{name}.md"
@@ -163,6 +164,10 @@ def _safe_name(value: str) -> str:
     if not cleaned:
         raise SystemExit("Name must not be empty.")
     return cleaned
+
+
+def _normalize_markdown(value: str) -> str:
+    return value.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\t", "\t")
 
 
 if __name__ == "__main__":
