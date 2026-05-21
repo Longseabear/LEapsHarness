@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .policy import ExecutionPolicy, PolicyError
 from .template import render_template
 
 
@@ -54,19 +55,22 @@ class CommandLLMAdapter:
         if self.input_mode == "argument":
             command = [*self.command, prompt]
             stdin = None
+        run_kwargs: dict[str, Any] = {
+            "cwd": self.cwd,
+            "env": env,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "capture_output": True,
+            "timeout": self.timeout_seconds,
+            "check": False,
+        }
+        if stdin is None:
+            run_kwargs["stdin"] = subprocess.DEVNULL
+        else:
+            run_kwargs["input"] = stdin
         try:
-            completed = subprocess.run(
-                command,
-                cwd=self.cwd,
-                env=env,
-                input=stdin,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                capture_output=True,
-                timeout=self.timeout_seconds,
-                check=False,
-            )
+            completed = subprocess.run(command, **run_kwargs)
         except OSError as exc:
             raise LLMAdapterError(f"Failed to start LLM command: {exc}") from exc
         except subprocess.TimeoutExpired as exc:
@@ -91,6 +95,7 @@ def build_llm_adapter(
     config: dict[str, Any],
     workspace_dir: Path,
     values: dict[str, str],
+    policy: ExecutionPolicy | None = None,
 ) -> EchoLLMAdapter | CommandLLMAdapter:
     adapter_type = config.get("type", "echo")
     if adapter_type == "echo":
@@ -104,6 +109,17 @@ def build_llm_adapter(
         env = {key: render_template(str(value), values) for key, value in config.get("env", {}).items()}
         timeout_seconds = int(config.get("timeout_seconds", 120))
         input_mode = str(config.get("input_mode", "stdin"))
+        if policy:
+            try:
+                policy.check_command(
+                    f"LLM adapter '{name}'",
+                    rendered_command,
+                    cwd=cwd,
+                    timeout_seconds=timeout_seconds,
+                    env=env,
+                )
+            except PolicyError as exc:
+                raise LLMAdapterError(str(exc)) from exc
         return CommandLLMAdapter(
             rendered_command,
             cwd=cwd,

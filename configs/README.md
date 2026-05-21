@@ -15,6 +15,8 @@ See `claude_cli.example.json` for the expected shape of `claude -p` backed LLM a
 See `claude_style_loop.example.json` for a producer/reviewer loop where both adapters are backed by `claude -p`.
 See `claude_weekly_style_transfer.example.json` for the weekly-report style-transfer evaluation loop.
 See `claude_github_review_knowledge.example.json` for the one-module GitHub review knowledge worker.
+See `policy.example.json` for command allowlist, cwd, timeout, and env-key execution policy.
+See `output_contract.example.json` for normalized `status`, `summary`, `result`, and trace envelope settings.
 
 Multiple config files can be layered with repeated `--config` flags. Apply broad defaults first and local overrides last.
 

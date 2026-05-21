@@ -34,6 +34,8 @@ def build_workflow_plan(
         "config_paths": [str(path) for path in resolved_config_paths],
         "artifact_root": str(artifact_root_path),
         "vars": vars_,
+        "policy": workflow.get("policy", {}),
+        "output_contract": workflow.get("output_contract", {"mode": "wrap"}),
         "step_count": len(steps),
         "steps": [_step_plan(index, step) for index, step in enumerate(steps)],
         "validation_errors": validate_workflow_file(workflow_file, config_paths=resolved_config_paths),

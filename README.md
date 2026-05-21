@@ -11,6 +11,7 @@ The harness provides:
 - File-based artifacts and run manifests.
 - CLI command steps for internal tools or agents.
 - Prompt construction with stored source data.
+- Structured output envelopes with summaries and trace metadata.
 - LLM adapter boundaries with an offline `echo` adapter and a command-backed adapter.
 
 No runtime dependency outside the Python standard library is required.
@@ -24,6 +25,7 @@ No runtime dependency outside the Python standard library is required.
 - Start from CLI-proven workflows, then expose them through a thin API only after the execution path is stable.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the harness-oriented agent architecture and control-plane principles.
+See [docs/DIAGRAMS.md](docs/DIAGRAMS.md) for generated Mermaid diagrams from workflow files and run manifests.
 
 ## Generalization Rules
 
@@ -70,6 +72,20 @@ workflows/weekly_report/.runs/demo/
 ```
 
 Open `manifest.json` in that run directory to inspect the executed steps and artifacts.
+Use `manifest.md` for a readable run summary, or generate a Mermaid status diagram:
+
+```powershell
+python -m leaps_harness diagram run .\workflows\weekly_report\.runs\demo\manifest.json --output .\weekly_report_run_diagram.md
+```
+
+Resume a failed run by reusing the leading steps that already succeeded:
+
+```powershell
+python -m leaps_harness run `
+  .\workflows\weekly_report\workflow.json `
+  --resume-from .\workflows\weekly_report\.runs\failed-run\manifest.json `
+  --run-id retry-001
+```
 
 Override workflow inputs with runtime vars:
 
@@ -87,6 +103,12 @@ python -m leaps_harness plan `
   .\workflows\weekly_report\workflow.json `
   --config .\configs\claude_cli.example.json `
   --var weekly_input=C:\data\team_weekly_reports.json
+```
+
+Generate a Mermaid workflow diagram from the same source of truth:
+
+```powershell
+python -m leaps_harness diagram workflow .\workflows\weekly_report\workflow.json --output .\weekly_report_workflow_diagram.md
 ```
 
 ## Workflow Shape
@@ -262,6 +284,30 @@ python -m leaps_harness run `
 ```
 
 Configs may also provide `vars`, such as `weekly_input`, and CLI `--var` values override workflow/config vars.
+
+Configs may also provide execution `policy` rules. Use these to limit command-backed steps, agents, and LLM adapters:
+
+```powershell
+python -m leaps_harness run `
+  .\workflows\weekly_report\workflow.json `
+  --config .\configs\claude_cli.example.json `
+  --config .\configs\policy.example.json `
+  --run-id guarded-run
+```
+
+Use `output_contract` to make command, agent, and LLM outputs traceable:
+
+```json
+{
+  "output_contract": {
+    "mode": "wrap",
+    "required_fields": ["status", "summary", "result"],
+    "trace_fields": ["decision_log", "uncertainties", "artifacts"]
+  }
+}
+```
+
+Raw output is still preserved. The harness also writes `output_envelope.json` and `summary.txt` for executable steps.
 
 ## API Wrapper
 

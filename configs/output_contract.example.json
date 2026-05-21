@@ -1,0 +1,17 @@
+{
+  "output_contract": {
+    "mode": "wrap",
+    "required_fields": [
+      "status",
+      "summary",
+      "result"
+    ],
+    "trace_fields": [
+      "decision_log",
+      "uncertainties",
+      "artifacts"
+    ],
+    "summary_max_chars": 240,
+    "inject_instructions": false
+  }
+}

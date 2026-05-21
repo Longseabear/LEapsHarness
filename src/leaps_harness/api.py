@@ -38,6 +38,7 @@ class HarnessApiHandler(BaseHTTPRequestHandler):
                 artifact_root=payload.get("artifact_root"),
                 config_paths=self._resolve_config_paths(payload),
                 run_vars=self._resolve_vars(payload),
+                resume_from=self._resolve_optional_path(payload.get("resume_from")),
             )
             summary = runner.run()
         except WorkflowError as exc:
@@ -122,6 +123,11 @@ class HarnessApiHandler(BaseHTTPRequestHandler):
             workflow_root = getattr(self.server, "workflow_root", Path.cwd())
             workflow_path = Path(workflow_root) / workflow_path
         return workflow_path.resolve()
+
+    def _resolve_optional_path(self, value: Any) -> Path | None:
+        if value in (None, ""):
+            return None
+        return self._resolve_path(value)
 
     def _send_json(self, status: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")

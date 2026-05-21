@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .api import serve
 from .config import ConfigError, load_json_file
+from .diagram import DiagramError, build_run_diagram, build_workflow_diagram
 from .planning import build_workflow_plan
 from .prompt_builder import PromptBuildError, build_prompt_from_file
 from .runner import WorkflowError, WorkflowRunner
@@ -21,6 +22,7 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("workflow", type=Path, help="Path to workflow.json.")
     run_parser.add_argument("--run-id", help="Optional run id for artifact output.")
     run_parser.add_argument("--artifact-root", type=Path, help="Override artifact root directory.")
+    run_parser.add_argument("--resume-from", type=Path, help="Resume by reusing leading succeeded steps from a manifest.")
     run_parser.add_argument(
         "--config",
         type=Path,
@@ -79,6 +81,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     render_prompt_parser.add_argument("--output", type=Path, help="Optional output file for the rendered prompt.")
 
+    diagram_parser = subparsers.add_parser("diagram", help="Generate Mermaid diagrams from workflows or run manifests.")
+    diagram_subparsers = diagram_parser.add_subparsers(dest="diagram_command", required=True)
+
+    diagram_workflow_parser = diagram_subparsers.add_parser("workflow", help="Diagram a workflow JSON file.")
+    diagram_workflow_parser.add_argument("workflow", type=Path, help="Path to workflow.json.")
+    diagram_workflow_parser.add_argument(
+        "--config",
+        type=Path,
+        action="append",
+        default=[],
+        help="Runtime config JSON for adapters. May be repeated; later files override earlier files.",
+    )
+    diagram_workflow_parser.add_argument("--output", type=Path, help="Optional output file for Mermaid Markdown.")
+
+    diagram_run_parser = diagram_subparsers.add_parser("run", help="Diagram a run manifest JSON file.")
+    diagram_run_parser.add_argument("manifest", type=Path, help="Path to manifest.json.")
+    diagram_run_parser.add_argument("--output", type=Path, help="Optional output file for Mermaid Markdown.")
+
     serve_parser = subparsers.add_parser("serve", help="Run the stdlib HTTP API wrapper.")
     serve_parser.add_argument("--host", default="127.0.0.1", help="Bind host.")
     serve_parser.add_argument("--port", type=int, default=8765, help="Bind port.")
@@ -99,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
                 artifact_root=args.artifact_root,
                 config_paths=args.config,
                 run_vars=_parse_vars(args.var),
+                resume_from=args.resume_from,
             )
             summary = runner.run()
         except WorkflowError as exc:
@@ -145,6 +166,18 @@ def main(argv: list[str] | None = None) -> int:
             print(prompt)
         return 0
 
+    if args.command == "diagram":
+        try:
+            if args.diagram_command == "workflow":
+                diagram = build_workflow_diagram(args.workflow, config_paths=args.config)
+            else:
+                diagram = build_run_diagram(args.manifest)
+        except DiagramError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        _write_output(diagram, args.output)
+        return 0
+
     if args.command == "serve":
         serve(args.host, args.port, args.workflow_root)
         return 0
@@ -163,3 +196,11 @@ def _parse_vars(pairs: list[str]) -> dict[str, str]:
             raise WorkflowError("Invalid --var value. KEY must not be empty.")
         values[key] = value
     return values
+
+
+def _write_output(content: str, output: Path | None) -> None:
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(content, encoding="utf-8", newline="\n")
+    else:
+        print(content)

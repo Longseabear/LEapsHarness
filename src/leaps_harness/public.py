@@ -19,6 +19,7 @@ def run_workflow(
     vars: dict[str, Any] | None = None,
     run_id: str | None = None,
     artifact_root: PathLike | None = None,
+    resume_from: PathLike | None = None,
 ) -> WorkflowResult:
     runner = WorkflowRunner(
         workflow,
@@ -26,6 +27,7 @@ def run_workflow(
         artifact_root=artifact_root,
         config_paths=_as_list(configs),
         run_vars=vars,
+        resume_from=resume_from,
     )
     return WorkflowResult(runner.run())
 

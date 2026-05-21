@@ -1,0 +1,13 @@
+{
+  "policy": {
+    "allowed_commands": [
+      "python",
+      "claude"
+    ],
+    "allowed_cwd_roots": [
+      "."
+    ],
+    "blocked_env": [],
+    "max_timeout_seconds": 600
+  }
+}

@@ -5,18 +5,20 @@ from pathlib import Path
 from typing import Any
 
 from .config import ConfigError, load_json_file, load_runtime_configs, merge_runtime_configs, normalize_config_paths
+from .output_contract import OutputContractError, merge_output_contracts
+from .policy import ExecutionPolicy, PolicyError
 
 
 SUPPORTED_STEP_TYPES = {"copy_file", "command", "prompt", "agent", "for_each", "llm", "review", "iterative_review"}
 OUTPUTS_BY_TYPE = {
     "copy_file": {"path"},
-    "command": {"stdout", "stderr", "metadata", "returncode"},
+    "command": {"stdout", "stderr", "metadata", "returncode", "envelope", "summary"},
     "prompt": {"prompt"},
-    "agent": {"input", "response", "metadata"},
-    "for_each": {"results", "combined", "count"},
-    "llm": {"response", "metadata"},
+    "agent": {"input", "response", "metadata", "envelope", "summary"},
+    "for_each": {"results", "combined", "count", "envelope", "summary"},
+    "llm": {"prompt", "response", "metadata", "envelope", "summary"},
     "review": {"review", "report", "passed"},
-    "iterative_review": {"final", "history", "review", "attempts", "passed"},
+    "iterative_review": {"final", "history", "review", "attempts", "passed", "envelope", "summary"},
 }
 TOKEN_PATTERN = re.compile(r"{{.*?}}")
 
@@ -40,6 +42,15 @@ def validate_workflow_file(
     steps = workflow.get("steps")
     if not isinstance(steps, list):
         return ["Workflow field 'steps' must be a list."]
+    try:
+        ExecutionPolicy.from_workflow(workflow.get("policy"), workspace_dir)
+    except PolicyError as exc:
+        errors.append(str(exc))
+    try:
+        merge_output_contracts(workflow.get("output_contract"))
+    except OutputContractError as exc:
+        errors.append(str(exc))
+    errors.extend(_validate_adapter_output_contracts(workflow))
 
     seen_ids: set[str] = set()
     known_outputs: dict[str, set[str]] = {}
@@ -60,6 +71,7 @@ def validate_workflow_file(
             errors.append(f"Step '{step_id}' has unsupported type '{step_type}'.")
             continue
 
+        errors.extend(_validate_step_output_contracts(step_id, step))
         errors.extend(_validate_step_shape(step_id, step_type, step, workflow, workspace_dir))
         errors.extend(_validate_artifact_refs(step_id, step, known_outputs))
         known_outputs[step_id] = OUTPUTS_BY_TYPE[step_type]
@@ -118,6 +130,33 @@ def _validate_step_shape(
 
 def _require_fields(step_id: str, step: dict[str, Any], fields: list[str]) -> list[str]:
     return [f"Step '{step_id}' requires '{field}'." for field in fields if field not in step]
+
+
+def _validate_adapter_output_contracts(workflow: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    for adapter_field in ("agent_adapters", "llm_adapters"):
+        adapters = workflow.get(adapter_field, {})
+        if not isinstance(adapters, dict):
+            continue
+        for adapter_name, adapter in adapters.items():
+            if not isinstance(adapter, dict):
+                continue
+            try:
+                merge_output_contracts(adapter.get("output_contract"))
+            except OutputContractError as exc:
+                errors.append(f"Adapter '{adapter_name}' output contract error: {exc}")
+    return errors
+
+
+def _validate_step_output_contracts(step_id: str, step: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    contracts = [step.get("output_contract"), step.get("producer_output_contract"), step.get("reviewer_output_contract")]
+    for contract in contracts:
+        try:
+            merge_output_contracts(contract)
+        except OutputContractError as exc:
+            errors.append(f"Step '{step_id}' output contract error: {exc}")
+    return errors
 
 
 def _validate_adapter(

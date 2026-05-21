@@ -14,6 +14,14 @@ from .agent import AgentAdapterError, build_agent_adapter
 from .artifacts import ArtifactStore, safe_name
 from .config import ConfigError, load_json_file, load_runtime_configs, merge_runtime_configs, normalize_config_paths
 from .llm import LLMAdapterError, build_llm_adapter
+from .output_contract import (
+    OutputContractError,
+    build_output_envelope,
+    build_output_instructions,
+    envelope_summary,
+    merge_output_contracts,
+)
+from .policy import ExecutionPolicy, PolicyError
 from .template import flatten_values, render_template
 
 
@@ -35,6 +43,7 @@ class WorkflowRunner:
         config_path: str | Path | None = None,
         config_paths: list[str | Path] | tuple[str | Path, ...] | None = None,
         run_vars: dict[str, Any] | None = None,
+        resume_from: str | Path | None = None,
     ) -> None:
         self.workflow_path = Path(workflow_path).resolve()
         self.workspace_dir = self.workflow_path.parent
@@ -43,12 +52,23 @@ class WorkflowRunner:
         self.workflow = self._load_workflow(self.workflow_path, self.config_paths)
         self.run_vars = self._merge_run_vars(self.workflow.get("vars", {}), run_vars or {})
         self.workflow["vars"] = self.run_vars
+        try:
+            self.policy = ExecutionPolicy.from_workflow(self.workflow.get("policy"), self.workspace_dir)
+            self.output_contract = merge_output_contracts(self.workflow.get("output_contract"))
+        except PolicyError as exc:
+            raise WorkflowError(str(exc)) from exc
+        except OutputContractError as exc:
+            raise WorkflowError(str(exc)) from exc
         self.run_id = run_id or self._new_run_id()
         artifact_root_value = artifact_root or self.workflow.get("artifact_root", ".runs")
         self.artifact_root = self._resolve_path(artifact_root_value)
         self.artifacts = ArtifactStore(self.artifact_root, self.run_id)
         self.outputs: dict[str, dict[str, Any]] = {}
         self.step_summaries: list[dict[str, Any]] = []
+        self.resume_from = Path(resume_from).resolve() if resume_from else None
+        self.resume_manifest = self._load_resume_manifest(self.resume_from)
+        self.resume_outputs = self._build_resume_outputs(self.resume_manifest)
+        self.artifacts.records.extend(self._resume_artifact_records(self.resume_manifest, set(self.resume_outputs)))
 
     def run(self) -> dict[str, Any]:
         started_at = self._now()
@@ -57,6 +77,8 @@ class WorkflowRunner:
 
         try:
             for step in self.workflow.get("steps", []):
+                if self._reuse_step(step):
+                    continue
                 self._run_step(step)
         except Exception as exc:
             status = "failed"
@@ -70,6 +92,23 @@ class WorkflowRunner:
         summary = self._summary(status, started_at, error)
         self.artifacts.write_manifest(summary)
         return summary
+
+    def _reuse_step(self, step: dict[str, Any]) -> bool:
+        step_id = step.get("id")
+        if not isinstance(step_id, str) or step_id not in self.resume_outputs:
+            return False
+        outputs = dict(self.resume_outputs[step_id])
+        self.outputs[step_id] = outputs
+        self.step_summaries.append(
+            {
+                "id": step_id,
+                "type": step.get("type", "unknown"),
+                "status": "reused",
+                "reused_from_manifest": str(self.resume_from),
+                "outputs": outputs,
+            }
+        )
+        return True
 
     def _run_step(self, step: dict[str, Any]) -> None:
         step_id = step.get("id")
@@ -150,23 +189,39 @@ class WorkflowRunner:
         rendered_command = [render_template(str(part), values) for part in command]
         cwd = self._resolve_path(step.get("cwd", "."))
         env = os.environ.copy()
-        env.update({key: render_template(str(value), values) for key, value in step.get("env", {}).items()})
+        policy_env = {key: render_template(str(value), values) for key, value in step.get("env", {}).items()}
+        env.update(policy_env)
         timeout_seconds = int(step.get("timeout_seconds", 120))
         stdin = self._resolve_value(step["stdin"]) if "stdin" in step else None
 
         try:
-            completed = subprocess.run(
+            self.policy.check_command(
+                f"step '{step_id}'",
                 rendered_command,
                 cwd=cwd,
-                env=env,
-                input=stdin,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                capture_output=True,
-                timeout=timeout_seconds,
-                check=False,
+                timeout_seconds=timeout_seconds,
+                env=policy_env,
             )
+        except PolicyError as exc:
+            raise StepExecutionError(str(exc)) from exc
+
+        run_kwargs: dict[str, Any] = {
+            "cwd": cwd,
+            "env": env,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "capture_output": True,
+            "timeout": timeout_seconds,
+            "check": False,
+        }
+        if stdin is None:
+            run_kwargs["stdin"] = subprocess.DEVNULL
+        else:
+            run_kwargs["input"] = stdin
+
+        try:
+            completed = subprocess.run(rendered_command, **run_kwargs)
         except OSError as exc:
             raise StepExecutionError(f"Step '{step_id}' command failed to start: {exc}") from exc
         except subprocess.TimeoutExpired as exc:
@@ -196,6 +251,20 @@ class WorkflowRunner:
             "metadata": str(metadata_path.resolve()),
             "returncode": completed.returncode,
         }
+        outputs.update(
+            self._write_output_envelope(
+                step_id,
+                completed.stdout,
+                source="command",
+                status="success" if completed.returncode == 0 else "failed",
+                contract=self._output_contract(step),
+                raw_output_path=stdout_path,
+                metadata_path=metadata_path,
+                extra_trace={"stderr_artifact": str(stderr_path.resolve())},
+                envelope_artifact=step.get("envelope_artifact"),
+                summary_artifact=step.get("summary_artifact"),
+            )
+        )
         if completed.returncode != 0 and not step.get("allow_failure", False):
             raise StepExecutionError(f"Step '{step_id}' command exited with code {completed.returncode}.")
         return outputs
@@ -228,15 +297,37 @@ class WorkflowRunner:
         if adapter_config is None:
             raise StepExecutionError(f"Step '{step_id}' references unknown LLM adapter '{adapter_name}'.")
 
+        contract = self._output_contract(adapter_config, step)
+        prompt = self._apply_output_instructions(prompt, contract)
+        prompt_path = self.artifacts.write_text(step_id, step.get("prompt_artifact", "llm_prompt.txt"), prompt)
         try:
-            adapter = build_llm_adapter(adapter_name, adapter_config, self.workspace_dir, self._values())
+            adapter = build_llm_adapter(adapter_name, adapter_config, self.workspace_dir, self._values(), policy=self.policy)
             result = adapter.generate(prompt)
         except LLMAdapterError as exc:
             raise StepExecutionError(f"Step '{step_id}' LLM adapter failed: {exc}") from exc
 
         response_path = self.artifacts.write_text(step_id, step.get("artifact", "response.txt"), result.text)
         metadata_path = self.artifacts.write_json(step_id, "llm.json", result.metadata)
-        return {"response": str(response_path.resolve()), "metadata": str(metadata_path.resolve())}
+        outputs = {
+            "prompt": str(prompt_path.resolve()),
+            "response": str(response_path.resolve()),
+            "metadata": str(metadata_path.resolve()),
+        }
+        outputs.update(
+            self._write_output_envelope(
+                step_id,
+                result.text,
+                source=f"llm:{adapter_name}",
+                status="success",
+                contract=contract,
+                raw_output_path=response_path,
+                metadata_path=metadata_path,
+                input_path=prompt_path,
+                envelope_artifact=step.get("envelope_artifact"),
+                summary_artifact=step.get("summary_artifact"),
+            )
+        )
+        return outputs
 
     def _agent(self, step_id: str, step: dict[str, Any]) -> dict[str, Any]:
         input_text = self._render_input_text(step, self._values(), required_field="input")
@@ -245,21 +336,39 @@ class WorkflowRunner:
         adapter_config = adapters.get(adapter_name)
         if adapter_config is None:
             raise StepExecutionError(f"Step '{step_id}' references unknown agent adapter '{adapter_name}'.")
+        contract = self._output_contract(adapter_config, step)
 
+        contract = self._output_contract(adapter_config, step)
+        input_text = self._apply_output_instructions(input_text, contract)
+        input_path = self.artifacts.write_text(step_id, step.get("input_artifact", "agent_input.txt"), input_text)
         try:
-            adapter = build_agent_adapter(adapter_name, adapter_config, self.workspace_dir, self._values())
+            adapter = build_agent_adapter(adapter_name, adapter_config, self.workspace_dir, self._values(), policy=self.policy)
             result = adapter.run(input_text)
         except AgentAdapterError as exc:
             raise StepExecutionError(f"Step '{step_id}' agent adapter failed: {exc}") from exc
 
-        input_path = self.artifacts.write_text(step_id, step.get("input_artifact", "agent_input.txt"), input_text)
         response_path = self.artifacts.write_text(step_id, step.get("artifact", "agent_response.txt"), result.text)
         metadata_path = self.artifacts.write_json(step_id, "agent.json", result.metadata)
-        return {
+        outputs = {
             "input": str(input_path.resolve()),
             "response": str(response_path.resolve()),
             "metadata": str(metadata_path.resolve()),
         }
+        outputs.update(
+            self._write_output_envelope(
+                step_id,
+                result.text,
+                source=f"agent:{adapter_name}",
+                status="success",
+                contract=contract,
+                raw_output_path=response_path,
+                metadata_path=metadata_path,
+                input_path=input_path,
+                envelope_artifact=step.get("envelope_artifact"),
+                summary_artifact=step.get("summary_artifact"),
+            )
+        )
+        return outputs
 
     def _for_each(self, step_id: str, step: dict[str, Any]) -> dict[str, Any]:
         if "items" not in step:
@@ -274,6 +383,7 @@ class WorkflowRunner:
         adapter_config = adapters.get(adapter_name)
         if adapter_config is None:
             raise StepExecutionError(f"Step '{step_id}' references unknown agent adapter '{adapter_name}'.")
+        contract = self._output_contract(adapter_config, step)
 
         template_value = step.get("input_template")
         if not template_value:
@@ -293,10 +403,11 @@ class WorkflowRunner:
             values = self._values()
             values.update(item_values)
             input_text = render_template(template_text, values)
+            input_text = self._apply_output_instructions(input_text, contract)
             input_path = self.artifacts.write_text(child_step_id, step.get("input_artifact", "agent_input.txt"), input_text)
 
             try:
-                adapter = build_agent_adapter(adapter_name, adapter_config, self.workspace_dir, values)
+                adapter = build_agent_adapter(adapter_name, adapter_config, self.workspace_dir, values, policy=self.policy)
                 result = adapter.run(input_text)
             except AgentAdapterError as exc:
                 error_path = self.artifacts.write_json(
@@ -318,15 +429,28 @@ class WorkflowRunner:
 
             response_path = self.artifacts.write_text(child_step_id, step.get("artifact", "agent_response.md"), result.text)
             metadata_path = self.artifacts.write_json(child_step_id, "agent.json", result.metadata)
-            item_results.append(
-                {
-                    "item_id": item_id,
-                    "status": "succeeded",
-                    "input": str(input_path.resolve()),
-                    "response": str(response_path.resolve()),
-                    "metadata": str(metadata_path.resolve()),
-                }
+            item_result = {
+                "item_id": item_id,
+                "status": "succeeded",
+                "input": str(input_path.resolve()),
+                "response": str(response_path.resolve()),
+                "metadata": str(metadata_path.resolve()),
+            }
+            item_result.update(
+                self._write_output_envelope(
+                    child_step_id,
+                    result.text,
+                    source=f"for_each:{step_id}:{adapter_name}",
+                    status="success",
+                    contract=contract,
+                    raw_output_path=response_path,
+                    metadata_path=metadata_path,
+                    input_path=input_path,
+                    envelope_artifact=step.get("item_envelope_artifact", "output_envelope.json"),
+                    summary_artifact=step.get("item_summary_artifact", "summary.txt"),
+                )
             )
+            item_results.append(item_result)
             combined_sections.append(result.text.strip())
 
         results_path = self.artifacts.write_json(step_id, step.get("results_artifact", "results.json"), {"items": item_results})
@@ -335,11 +459,27 @@ class WorkflowRunner:
             step.get("combined_artifact", "combined.md"),
             "\n\n".join(section for section in combined_sections if section),
         )
-        return {
+        combined_text = "\n\n".join(section for section in combined_sections if section)
+        outputs = {
             "results": str(results_path.resolve()),
             "combined": str(combined_path.resolve()),
             "count": len(item_results),
         }
+        outputs.update(
+            self._write_output_envelope(
+                step_id,
+                combined_text,
+                source=f"for_each:{adapter_name}",
+                status="success",
+                contract=contract,
+                raw_output_path=combined_path,
+                metadata_path=results_path,
+                extra_trace={"item_count": len(item_results)},
+                envelope_artifact=step.get("envelope_artifact"),
+                summary_artifact=step.get("summary_artifact"),
+            )
+        )
+        return outputs
 
     def _review(self, step_id: str, step: dict[str, Any]) -> dict[str, Any]:
         if "target" not in step:
@@ -377,6 +517,14 @@ class WorkflowRunner:
         reviewer_adapter_name = step.get("reviewer_adapter", "default")
         producer_config = self._adapter_config(step_id, "agent_adapters", producer_adapter_name)
         reviewer_config = self._adapter_config(step_id, "llm_adapters", reviewer_adapter_name)
+        producer_contract = self._output_contract(
+            producer_config,
+            {"output_contract": step.get("producer_output_contract", step.get("output_contract"))},
+        )
+        reviewer_contract = self._output_contract(
+            reviewer_config,
+            {"output_contract": step.get("reviewer_output_contract", step.get("output_contract"))},
+        )
         data_values = self._step_data_values(step)
         previous_feedback = str(step.get("initial_feedback", ""))
         history: list[dict[str, Any]] = []
@@ -400,7 +548,13 @@ class WorkflowRunner:
             producer_prompt_path = self.artifacts.write_text(attempt_step_id, "producer_prompt.txt", producer_prompt)
 
             try:
-                producer = build_agent_adapter(producer_adapter_name, producer_config, self.workspace_dir, values)
+                producer = build_agent_adapter(
+                    producer_adapter_name,
+                    producer_config,
+                    self.workspace_dir,
+                    values,
+                    policy=self.policy,
+                )
                 producer_result = producer.run(producer_prompt)
             except AgentAdapterError as exc:
                 raise StepExecutionError(f"Step '{step_id}' producer failed on attempt {attempt}: {exc}") from exc
@@ -408,6 +562,18 @@ class WorkflowRunner:
             final_text = producer_result.text
             draft_path = self.artifacts.write_text(attempt_step_id, step.get("draft_artifact", "draft.md"), final_text)
             producer_metadata_path = self.artifacts.write_json(attempt_step_id, "producer_agent.json", producer_result.metadata)
+            producer_envelope_outputs = self._write_output_envelope(
+                attempt_step_id,
+                producer_result.text,
+                source=f"iterative_review:{step_id}:producer:{producer_adapter_name}",
+                status="success",
+                contract=producer_contract,
+                raw_output_path=draft_path,
+                metadata_path=producer_metadata_path,
+                input_path=producer_prompt_path,
+                envelope_artifact="producer_output_envelope.json",
+                summary_artifact="producer_summary.txt",
+            )
 
             review_values = dict(values)
             review_values["draft"] = final_text
@@ -415,7 +581,13 @@ class WorkflowRunner:
             reviewer_prompt_path = self.artifacts.write_text(attempt_step_id, "reviewer_prompt.txt", reviewer_prompt)
 
             try:
-                reviewer = build_llm_adapter(reviewer_adapter_name, reviewer_config, self.workspace_dir, review_values)
+                reviewer = build_llm_adapter(
+                    reviewer_adapter_name,
+                    reviewer_config,
+                    self.workspace_dir,
+                    review_values,
+                    policy=self.policy,
+                )
                 reviewer_result = reviewer.generate(reviewer_prompt)
             except LLMAdapterError as exc:
                 raise StepExecutionError(f"Step '{step_id}' reviewer failed on attempt {attempt}: {exc}") from exc
@@ -424,6 +596,18 @@ class WorkflowRunner:
             reviewer_metadata_path = self.artifacts.write_json(attempt_step_id, "reviewer_llm.json", reviewer_result.metadata)
             final_review = self._parse_iterative_review(step_id, attempt, reviewer_result.text)
             review_path = self.artifacts.write_json(attempt_step_id, step.get("review_artifact", "review.json"), final_review)
+            reviewer_envelope_outputs = self._write_output_envelope(
+                attempt_step_id,
+                reviewer_result.text,
+                source=f"iterative_review:{step_id}:reviewer:{reviewer_adapter_name}",
+                status="success",
+                contract=reviewer_contract,
+                raw_output_path=review_raw_path,
+                metadata_path=reviewer_metadata_path,
+                input_path=reviewer_prompt_path,
+                envelope_artifact="reviewer_output_envelope.json",
+                summary_artifact="reviewer_summary.txt",
+            )
             passed = self._iterative_review_passed(final_review)
             feedback = str(final_review.get("feedback", ""))
             history.append(
@@ -439,6 +623,10 @@ class WorkflowRunner:
                     "review_raw": str(review_raw_path.resolve()),
                     "producer_metadata": str(producer_metadata_path.resolve()),
                     "reviewer_metadata": str(reviewer_metadata_path.resolve()),
+                    "producer_envelope": producer_envelope_outputs.get("envelope"),
+                    "producer_summary": producer_envelope_outputs.get("summary"),
+                    "reviewer_envelope": reviewer_envelope_outputs.get("envelope"),
+                    "reviewer_summary": reviewer_envelope_outputs.get("summary"),
                 }
             )
             if passed:
@@ -452,13 +640,28 @@ class WorkflowRunner:
         if not passed and step.get("fail_on_max_attempts", True):
             raise StepExecutionError(f"Step '{step_id}' did not pass review after {max_attempts} attempts.")
 
-        return {
+        outputs = {
             "final": str(final_path.resolve()),
             "history": str(history_path.resolve()),
             "review": str(final_review_path.resolve()),
             "attempts": len(history),
             "passed": passed,
         }
+        outputs.update(
+            self._write_output_envelope(
+                step_id,
+                final_text,
+                source=f"iterative_review:{step_id}",
+                status="success" if passed else "failed",
+                contract=self._output_contract(step),
+                raw_output_path=final_path,
+                metadata_path=final_review_path,
+                extra_trace={"attempts": len(history), "passed": passed},
+                envelope_artifact=step.get("envelope_artifact"),
+                summary_artifact=step.get("summary_artifact"),
+            )
+        )
+        return outputs
 
     def _resolve_value(self, spec: Any) -> Any:
         if isinstance(spec, dict):
@@ -481,6 +684,134 @@ class WorkflowRunner:
         if isinstance(spec, str):
             return render_template(spec, self._values())
         return spec
+
+    def _output_contract(self, *owners: Any) -> dict[str, Any]:
+        contracts: list[Any] = [self.output_contract]
+        for owner in owners:
+            if isinstance(owner, dict) and "output_contract" in owner:
+                contracts.append(owner["output_contract"])
+        try:
+            return merge_output_contracts(*contracts)
+        except OutputContractError as exc:
+            raise StepExecutionError(str(exc)) from exc
+
+    def _apply_output_instructions(self, text: str, contract: dict[str, Any]) -> str:
+        if not contract.get("inject_instructions", False):
+            return text
+        return text.rstrip() + "\n\n" + build_output_instructions(contract) + "\n"
+
+    def _write_output_envelope(
+        self,
+        step_id: str,
+        raw_text: str,
+        *,
+        source: str,
+        status: str,
+        contract: dict[str, Any],
+        raw_output_path: Path | None = None,
+        metadata_path: Path | None = None,
+        input_path: Path | None = None,
+        extra_trace: dict[str, Any] | None = None,
+        envelope_artifact: Any = None,
+        summary_artifact: Any = None,
+    ) -> dict[str, str]:
+        try:
+            envelope = build_output_envelope(
+                raw_text,
+                source=source,
+                status=status,
+                contract=contract,
+                raw_output_artifact=str(raw_output_path.resolve()) if raw_output_path else None,
+                metadata_artifact=str(metadata_path.resolve()) if metadata_path else None,
+                input_artifact=str(input_path.resolve()) if input_path else None,
+                extra_trace=extra_trace,
+            )
+        except OutputContractError as exc:
+            raise StepExecutionError(str(exc)) from exc
+        if envelope is None:
+            return {}
+        envelope_path = self.artifacts.write_json(
+            step_id,
+            str(envelope_artifact or "output_envelope.json"),
+            envelope,
+        )
+        summary_path = self.artifacts.write_text(
+            step_id,
+            str(summary_artifact or "summary.txt"),
+            envelope_summary(envelope),
+        )
+        return {
+            "envelope": str(envelope_path.resolve()),
+            "summary": str(summary_path.resolve()),
+        }
+
+    def _load_resume_manifest(self, path: Path | None) -> dict[str, Any] | None:
+        if path is None:
+            return None
+        if not path.exists():
+            raise WorkflowError(f"Resume manifest does not exist: {path}")
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise WorkflowError(f"Invalid resume manifest JSON: {path}: {exc}") from exc
+        if not isinstance(manifest, dict):
+            raise WorkflowError(f"Resume manifest must contain an object: {path}")
+        previous_workflow_path = manifest.get("workflow_path")
+        if previous_workflow_path and Path(str(previous_workflow_path)).resolve() != self.workflow_path:
+            raise WorkflowError(
+                "Resume manifest workflow_path does not match current workflow: "
+                f"{previous_workflow_path}"
+            )
+        return manifest
+
+    def _build_resume_outputs(self, manifest: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+        if manifest is None:
+            return {}
+        previous_steps = manifest.get("steps", [])
+        if not isinstance(previous_steps, list):
+            raise WorkflowError("Resume manifest field 'steps' must be a list.")
+        current_steps = self.workflow.get("steps", [])
+        if not isinstance(current_steps, list):
+            raise WorkflowError("Workflow 'steps' must be a list.")
+
+        reusable: dict[str, dict[str, Any]] = {}
+        for index, current_step in enumerate(current_steps):
+            if not isinstance(current_step, dict) or index >= len(previous_steps):
+                break
+            previous_step = previous_steps[index]
+            if not isinstance(previous_step, dict):
+                break
+            if current_step.get("id") != previous_step.get("id"):
+                break
+            if current_step.get("type") != previous_step.get("type"):
+                break
+            if previous_step.get("status") != "succeeded":
+                break
+            outputs = previous_step.get("outputs")
+            if not isinstance(outputs, dict):
+                break
+            reusable[str(current_step["id"])] = dict(outputs)
+        return reusable
+
+    def _resume_artifact_records(
+        self,
+        manifest: dict[str, Any] | None,
+        reusable_step_ids: set[str],
+    ) -> list[dict[str, Any]]:
+        if manifest is None or not reusable_step_ids:
+            return []
+        records = manifest.get("artifacts", [])
+        if not isinstance(records, list):
+            return []
+        reusable_records: list[dict[str, Any]] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            if record.get("step_id") in reusable_step_ids:
+                reusable_record = dict(record)
+                reusable_record["reused_from_manifest"] = str(self.resume_from)
+                reusable_records.append(reusable_record)
+        return reusable_records
 
     def _read_template(self, step_id: str, step: dict[str, Any], field: str) -> str:
         value = step.get(field)
@@ -678,6 +1009,9 @@ class WorkflowRunner:
             "readable_manifest_path": str(self.artifacts.readable_manifest_path.resolve()),
             "steps": self.step_summaries,
         }
+        if self.resume_from:
+            summary["resume_from_manifest"] = str(self.resume_from)
+            summary["reused_steps"] = sorted(self.resume_outputs)
         if error:
             summary["error"] = error
         return summary

@@ -15,6 +15,9 @@ LEapsCustomHarness/
   src/
     leaps_harness/
       cli.py
+      diagram.py
+      output_contract.py
+      policy.py
       __main__.py
       core/
       adapters/
@@ -38,6 +41,9 @@ LEapsCustomHarness/
 - `adapters/`: LLM adapters, tool adapters, and CLI agent adapters.
 - `steps/`: built-in step implementations such as `copy_file`, `command`, `prompt`, `llm`, and future evaluators.
 - `runtime/`: configuration loading, environment resolution, run ids, path policy, and operator-facing runtime utilities.
+- `diagram.py`: read-only Mermaid diagram generation from workflow files and run manifests.
+- `output_contract.py`: structured `status` / `summary` / `result` envelopes and trace metadata for worker outputs.
+- `policy.py`: execution policy checks for command-backed steps and adapters.
 
 The current implementation is intentionally smaller than this target shape. Move code into these packages only when a file becomes too large or a second implementation makes the boundary useful.
 

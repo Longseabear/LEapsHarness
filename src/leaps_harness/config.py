@@ -28,7 +28,7 @@ def merge_runtime_config(workflow: dict[str, Any], config: dict[str, Any] | None
     if not config:
         return merged
 
-    for key in ("llm_adapters", "agent_adapters", "vars"):
+    for key in ("llm_adapters", "agent_adapters", "vars", "policy", "output_contract"):
         if key in config:
             config_value = config[key]
             if not isinstance(config_value, dict):

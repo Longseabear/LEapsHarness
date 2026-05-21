@@ -121,6 +121,54 @@ The step writes per-attempt prompts, drafts, raw reviewer output, parsed review 
 - Failure details should expose the step id, command metadata when available, stdout/stderr artifacts, and partial outputs.
 - Every run writes both `manifest.json` and a human-readable `manifest.md`.
 
+## Resume From Manifest
+
+Use `--resume-from` to continue after a failed run without repeating the leading steps that already succeeded:
+
+```powershell
+python -m leaps_harness run `
+  .\workflows\weekly_report\workflow.json `
+  --resume-from .\workflows\weekly_report\.runs\failed-run\manifest.json `
+  --run-id retry-001
+```
+
+Resume behavior is intentionally conservative:
+
+- The previous manifest must point to the same workflow path.
+- Only the leading prefix of previous `succeeded` steps is reused.
+- Reused steps appear in the new manifest with status `reused`.
+- Reused step outputs keep pointing at the original artifacts, so lineage remains visible.
+- The first failed, missing, changed, or non-matching step is executed again.
+
+Use a new `run_id` for retries unless there is a clear reason to write into the same artifact directory.
+
+## Execution Policy
+
+Workflows or layered config files may define `policy`:
+
+```json
+{
+  "policy": {
+    "allowed_commands": ["python", "claude"],
+    "allowed_cwd_roots": ["."],
+    "max_timeout_seconds": 600,
+    "blocked_env": ["PRODUCTION_TOKEN"]
+  }
+}
+```
+
+Policy is enforced before command-backed execution starts for:
+
+- `command` steps
+- command-backed `agent` adapters
+- command-backed `for_each` agent adapters
+- command-backed `llm` adapters
+- `iterative_review` producer and reviewer adapters
+
+`allowed_commands` accepts executable names such as `python` or `claude`, or absolute executable paths.
+
+If a policy field is omitted, that restriction is not applied. This keeps existing workflows runnable while allowing operated workflows to opt into stricter controls.
+
 ## Validation
 
 Preview the merged execution plan before running:
@@ -197,3 +245,53 @@ Use `argument` for CLIs such as `claude -p`, where the harness should append the
   "input_mode": "argument"
 }
 ```
+
+When a command step has no explicit `stdin`, or when an adapter uses `argument` mode, the child process receives `stdin` from `DEVNULL`. This prevents an internal CLI from accidentally reading the harness process input stream.
+
+## Structured Output Envelope
+
+Executable outputs are normalized into an operator-facing envelope. The harness still stores raw stdout, raw agent responses, raw LLM responses, stderr, prompts, and metadata, but it also writes:
+
+- `output_envelope.json`
+- `summary.txt`
+
+Default envelope shape:
+
+```json
+{
+  "status": "success",
+  "summary": "Short operator-facing summary",
+  "result": "Final answer or payload",
+  "trace": {
+    "source": "agent:writer",
+    "decision_log": [],
+    "uncertainties": [],
+    "artifacts": [],
+    "raw_output_artifact": "..."
+  }
+}
+```
+
+This is for traceability, not hidden chain-of-thought. Agents should put externally shareable rationale, evidence notes, uncertainties, and artifact references in `trace`. They should not reveal private internal reasoning.
+
+The contract can be configured at workflow, adapter, or step level:
+
+```json
+{
+  "output_contract": {
+    "mode": "require_json",
+    "required_fields": ["status", "summary", "result"],
+    "trace_fields": ["decision_log", "uncertainties", "artifacts"],
+    "summary_max_chars": 240,
+    "inject_instructions": true
+  }
+}
+```
+
+Modes:
+
+- `wrap`: accept JSON envelopes when present; otherwise wrap raw text into the standard envelope.
+- `require_json`: require the worker to return a JSON object with the required fields.
+- `off`: skip envelope generation for that scope.
+
+`inject_instructions` appends a compact instruction telling the worker to return the envelope JSON. Use it for general workers. Avoid it when a step already has a custom strict JSON schema unless the schemas are compatible.
